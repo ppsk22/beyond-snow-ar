@@ -13,6 +13,8 @@ export class DepthFrame {
     this.wz = new Float32Array(0);
     this.ny = new Float32Array(0);     // normal.y of each sample (-2 = unknown)
     this.valid = new Uint8Array(0);
+    this.person = new Uint8Array(0);   // 1 = sample is on a person (ML or preview mask)
+    this.dyn = new Uint8Array(0);      // 1 = sample is in a dynamic voxel (set by Occupancy)
     this.proj = new THREE.Matrix4();
     this.projInv = new THREE.Matrix4();
     this.camWorld = new THREE.Matrix4();
@@ -33,6 +35,8 @@ export class DepthFrame {
     this.wx = new Float32Array(n); this.wy = new Float32Array(n); this.wz = new Float32Array(n);
     this.ny = new Float32Array(n);
     this.valid = new Uint8Array(n);
+    this.person = new Uint8Array(n);
+    this.dyn = new Uint8Array(n);
     this.rayX = new Float32Array(n); this.rayY = new Float32Array(n);
     this._projKey = '';
   }

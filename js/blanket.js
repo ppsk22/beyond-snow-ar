@@ -1,8 +1,14 @@
-// Renders the snow of a SnowWorld as a continuous blanket: one quad per surface cell, corner heights
-// averaged over the 4 touching cells of the same level, so caps round off at edges (like the 2D glyph caps).
+// Renders the snow of a SnowWorld as one continuous blanket.
+// Corner heights are averaged over the 4 touching cells of the same level, then every cell is cut
+// along the iso line "height = threshold" (marching squares). Empty cells next to snow ("fringe")
+// are cut too, so patch borders become smooth curves instead of 5 cm squares.
 // The world is split into tiles; only dirty tiles are rebuilt, within a per-frame budget.
 
 import * as THREE from 'three';
+
+const EPS = 0.0015;          // snow thinner than this is not drawn (the contour threshold)
+const MAXV = 6;              // marching squares yields at most 6 vertices per cell
+const MAXI = 12;             // and at most 4 triangles
 
 export class BlanketRenderer {
   constructor(world, material, parent) {
@@ -14,6 +20,14 @@ export class BlanketRenderer {
     this.indexVersion = -1;
     this.lift = 0.004;            // keeps the blanket from z-fighting with noisy real surfaces
     this.lumpScale = 1;
+    this.edgeTilt = 1.2;          // how strongly patch edges lean outward (drives outline and shade band)
+    // scratch
+    this.hh = new Float32Array(16);  // 4x4 cell heights around the cell (-1 = no live level)
+    this.yy = new Float32Array(16);
+    this.cx = new Float32Array(4); this.cy = new Float32Array(4); this.cz = new Float32Array(4);
+    this.ch = new Float32Array(4);
+    this.nx = new Float32Array(4); this.ny = new Float32Array(4); this.nz = new Float32Array(4);
+    this.fringe = new Set();
   }
 
   reindex() {
@@ -37,93 +51,152 @@ export class BlanketRenderer {
     return t;
   }
 
-  ensure(t, quads) {
-    if (quads <= t.cap) return;
+  ensure(t, cells) {
+    if (cells <= t.cap) return;
     let cap = Math.max(64, t.cap);
-    while (cap < quads) cap *= 2;
+    while (cap < cells) cap *= 2;
     t.cap = cap;
-    t.pos = new Float32Array(cap * 12);
-    t.nor = new Float32Array(cap * 12);
-    t.idx = new Uint32Array(cap * 6);
+    t.pos = new Float32Array(cap * MAXV * 3);
+    t.nor = new Float32Array(cap * MAXV * 3);
+    t.idx = new Uint32Array(cap * MAXI);
     t.geo.setAttribute('position', new THREE.BufferAttribute(t.pos, 3).setUsage(THREE.DynamicDrawUsage));
     t.geo.setAttribute('normal', new THREE.BufferAttribute(t.nor, 3).setUsage(THREE.DynamicDrawUsage));
     t.geo.setIndex(new THREE.BufferAttribute(t.idx, 1).setUsage(THREE.DynamicDrawUsage));
   }
 
-  // Height of the snow in a cell that belongs to the same level as y (0 if no live level there).
   lv(ix, iz, y, P) {
     const l = this.world.levelAt(ix, iz, y, P.levelMerge);
     return l && this.world.isLive(l, P) ? l : null;
   }
 
-  build(t, P) {
+  // Fill the 4x4 neighborhood (cells ix-1..ix+2, iz-1..iz+2) used by this cell's 4 corners.
+  gather(ix, iz, y, P) {
     const cell = this.world.cell;
-    const lift = this.lift;
-    let q = 0;
-    this.ensure(t, t.levels.length);
-    const pos = t.pos, nor = t.nor, idx = t.idx;
-    const hh = new Float32Array(9);   // 3x3 cell snow heights around the current cell (-1 = no surface)
-    const yy = new Float32Array(9);   // 3x3 surface heights
+    const amt = P.lumps * this.lumpScale;
+    for (let dz = -1; dz <= 2; dz++) {
+      for (let dx = -1; dx <= 2; dx++) {
+        const k = (dz + 1) * 4 + (dx + 1);
+        const nl = this.lv(ix + dx, iz + dz, y, P);
+        // Lumps are applied per cell, so heights and normals agree (and the toon steps show them).
+        this.hh[k] = nl ? nl.vis * lump((ix + dx + 0.5) * cell, (iz + dz + 0.5) * cell, amt) : -1;
+        this.yy[k] = nl ? nl.y : y;
+      }
+    }
+  }
+
+  // Corner c (0..3 = (0,0),(1,0),(1,1),(0,1)) of the current cell: height, base y, normal.
+  corner(c, ix, iz, y) {
+    const cell = this.world.cell, hh = this.hh, yy = this.yy;
+    const cx = c === 1 || c === 2 ? 1 : 0, cz = c >= 2 ? 1 : 0;
+    // The 4 cells around this corner in the 4x4 grid: rows cz..cz+1, cols cx..cx+1
+    const a = cz * 4 + cx, b = a + 1, d = a + 4, e = a + 5;
+    const A = Math.max(0, hh[a]), B = Math.max(0, hh[b]), D = Math.max(0, hh[d]), E = Math.max(0, hh[e]);
+    let ys = 0, yn = 0;
+    if (hh[a] >= 0) { ys += yy[a]; yn++; }
+    if (hh[b] >= 0) { ys += yy[b]; yn++; }
+    if (hh[d] >= 0) { ys += yy[d]; yn++; }
+    if (hh[e] >= 0) { ys += yy[e]; yn++; }
+    this.ch[c] = (A + B + D + E) * 0.25;
+    this.cy[c] = yn ? ys / yn : y;
+    // Corners sit a little outside the cell: tiles are rebuilt at different moments and the small
+    // overlap hides hairline cracks between them.
+    const g = 0.06;
+    this.cx[c] = (ix + cx + (cx ? g : -g)) * cell;
+    this.cz[c] = (iz + cz + (cz ? g : -g)) * cell;
+    const gx = ((B + E) - (A + D)) / (2 * cell);
+    const gz = ((D + E) - (A + B)) / (2 * cell);
+    const nl = Math.hypot(gx, 1, gz);
+    this.nx[c] = -gx / nl; this.ny[c] = 1 / nl; this.nz[c] = -gz / nl;
+  }
+
+  // Emit the marching squares polygon of the current cell. Returns vertices written.
+  emit(t, v0, i0) {
+    const pos = t.pos, nor = t.nor, idx = t.idx, lift = this.lift;
+    const { ch, cx, cy, cz, nx, ny, nz } = this;
+    let n = 0;
+    const put = (x, y, z, a, b, c) => {
+      const o = (v0 + n) * 3;
+      pos[o] = x; pos[o + 1] = y; pos[o + 2] = z;
+      nor[o] = a; nor[o + 1] = b; nor[o + 2] = c;
+      n++;
+    };
+    for (let c = 0; c < 4; c++) {
+      const c2 = (c + 1) & 3;
+      const inA = ch[c] > EPS, inB = ch[c2] > EPS;
+      if (inA) put(cx[c], cy[c] + ch[c] + lift, cz[c], nx[c], ny[c], nz[c]);
+      if (inA !== inB) {
+        const t2 = (EPS - ch[c]) / (ch[c2] - ch[c]);
+        // Contour vertex sits on the surface; its normal leans outward so the edge reads as a rounded lip.
+        const ex = cx[c] + (cx[c2] - cx[c]) * t2, ez = cz[c] + (cz[c2] - cz[c]) * t2;
+        const ey = cy[c] + (cy[c2] - cy[c]) * t2;
+        // Tilt the normal outward (from the snowy corner toward the empty one), like a rounded edge.
+        let ox = cx[c2] - cx[c], oz = cz[c2] - cz[c];
+        if (inB) { ox = -ox; oz = -oz; }
+        const ol = Math.hypot(ox, oz) || 1;
+        const k = this.edgeTilt;
+        let qx = nx[c] + (nx[c2] - nx[c]) * t2 + (ox / ol) * k;
+        let qy = ny[c] + (ny[c2] - ny[c]) * t2;
+        let qz = nz[c] + (nz[c2] - nz[c]) * t2 + (oz / ol) * k;
+        const ql = Math.hypot(qx, qy, qz);
+        put(ex, ey + lift, ez, qx / ql, qy / ql, qz / ql);
+      }
+    }
+    if (n < 3) return [0, 0];
+    // Fan triangulation; winding chosen so faces point up (corner order runs +x then +z).
+    let k = 0;
+    for (let j = 1; j < n - 1; j++) {
+      idx[i0 + k++] = v0; idx[i0 + k++] = v0 + j + 1; idx[i0 + k++] = v0 + j;
+    }
+    return [n, k];
+  }
+
+  build(t, P) {
+    const fr = this.fringe;
+    fr.clear();
+    // Fringe cells: empty neighbors of live cells, so borders get a smooth falloff instead of a cut.
     for (const l of t.levels) {
-      if (!this.world.isLive(l, P)) continue;
-      let any = l.vis > 0.0005;
+      if (!this.world.isLive(l, P) || l.vis <= EPS) continue;
       for (let dz = -1; dz <= 1; dz++) {
         for (let dx = -1; dx <= 1; dx++) {
-          const nl = (dx || dz) ? this.lv(l.ix + dx, l.iz + dz, l.y, P) : l;
-          const k = (dz + 1) * 3 + (dx + 1);
-          // Lumps are applied per cell, so heights and normals agree (and the toon steps show them).
-          hh[k] = nl ? nl.vis * lump((l.ix + dx + 0.5) * cell, (l.iz + dz + 0.5) * cell, P.lumps * this.lumpScale) : -1;
-          yy[k] = nl ? nl.y : l.y;
-          if (nl && nl.vis > 0.0005) any = true;
+          if (!dx && !dz) continue;
+          if (this.lv(l.ix + dx, l.iz + dz, l.y, P)) continue;
+          fr.add((l.ix + dx) + ',' + (l.iz + dz) + ',' + Math.round(l.y * 50));
         }
       }
+    }
+    this.ensure(t, t.levels.length + fr.size);
+    let v = 0, i = 0;
+    for (const l of t.levels) {
+      if (!this.world.isLive(l, P)) continue;
+      this.gather(l.ix, l.iz, l.y, P);
+      let any = false;
+      for (let k = 0; k < 16; k++) if (this.hh[k] > EPS) { any = true; break; }
       if (!any) continue;
-      // Corners: (0,0) is the -x,-z corner of this cell.
-      for (let c = 0; c < 4; c++) {
-        const cx = c & 1, cz = c >> 1;
-        // the 4 cells touching this corner, in 3x3 indices
-        const ka = cz * 3 + cx, kb = ka + 1, kd = ka + 3, ke = ka + 4;
-        const A = Math.max(0, hh[ka]), B = Math.max(0, hh[kb]), D = Math.max(0, hh[kd]), E = Math.max(0, hh[ke]);
-        // Shared base height: average surface height of the touching cells, so the blanket has no
-        // steps between cells even though every cell's measured height is a bit noisy.
-        let ys = 0, yn = 0;
-        if (hh[ka] >= 0) { ys += yy[ka]; yn++; }
-        if (hh[kb] >= 0) { ys += yy[kb]; yn++; }
-        if (hh[kd] >= 0) { ys += yy[kd]; yn++; }
-        if (hh[ke] >= 0) { ys += yy[ke]; yn++; }
-        const baseY = yn ? ys / yn : l.y;
-        // Missing cells (surface ends) count as zero height: caps round off at table edges.
-        const height = (A + B + D + E) * 0.25;
-        const gx = ((B + E) - (A + D)) / (2 * cell);
-        const gz = ((D + E) - (A + B)) / (2 * cell);
-        const nl = Math.hypot(gx, 1, gz);
-        const o = q * 12 + c * 3;
-        // Quads overlap their neighbors a little: tiles are rebuilt at different moments, and the
-        // overlap hides hairline cracks from tiny height differences in between.
-        const grow = 0.08;
-        pos[o] = (l.ix + cx + (cx ? grow : -grow)) * cell;
-        pos[o + 1] = baseY + height + lift;
-        pos[o + 2] = (l.iz + cz + (cz ? grow : -grow)) * cell;
-        nor[o] = -gx / nl; nor[o + 1] = 1 / nl; nor[o + 2] = -gz / nl;
-      }
-      const v0 = q * 4, io = q * 6;
-      idx[io] = v0; idx[io + 1] = v0 + 2; idx[io + 2] = v0 + 1;
-      idx[io + 3] = v0 + 1; idx[io + 4] = v0 + 2; idx[io + 5] = v0 + 3;
-      q++;
+      for (let c = 0; c < 4; c++) this.corner(c, l.ix, l.iz, l.y);
+      const [nv, ni] = this.emit(t, v, i);
+      v += nv; i += ni;
+    }
+    for (const key of fr) {
+      const parts = key.split(',');
+      const ix = +parts[0], iz = +parts[1], y = +parts[2] / 50;
+      // Fringe cells belong to the tile of their live neighbor, so a cell may appear in two tiles
+      // at a tile border; both draw the same polygon, which is harmless.
+      this.gather(ix, iz, y, P);
+      for (let c = 0; c < 4; c++) this.corner(c, ix, iz, y);
+      const [nv, ni] = this.emit(t, v, i);
+      v += nv; i += ni;
     }
     const g = t.geo;
     if (g.attributes.position) {
-      g.attributes.position.needsUpdate = true;
-      g.attributes.normal.needsUpdate = true;
-      g.index.needsUpdate = true;
-      g.attributes.position.updateRanges.length = 0;
-      g.attributes.normal.updateRanges.length = 0;
-      g.index.updateRanges.length = 0;
-      g.attributes.position.addUpdateRange(0, q * 12);
-      g.attributes.normal.addUpdateRange(0, q * 12);
-      g.index.addUpdateRange(0, q * 6);
+      for (const a of [g.attributes.position, g.attributes.normal, g.index]) {
+        a.needsUpdate = true;
+        a.updateRanges.length = 0;
+      }
+      g.attributes.position.addUpdateRange(0, v * 3);
+      g.attributes.normal.addUpdateRange(0, v * 3);
+      g.index.addUpdateRange(0, i);
     }
-    g.setDrawRange(0, q * 6);
+    g.setDrawRange(0, i);
     return t.levels.length;
   }
 
