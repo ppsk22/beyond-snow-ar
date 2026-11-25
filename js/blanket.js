@@ -70,15 +70,19 @@ export class BlanketRenderer {
   }
 
   // Fill the 4x4 neighborhood (cells ix-1..ix+2, iz-1..iz+2) used by this cell's 4 corners.
-  gather(ix, iz, y, P) {
+  gather(ix, iz, y, P, refY = y) {
+    this.refY = refY;
     const cell = this.world.cell;
     const amt = P.lumps * this.lumpScale;
     for (let dz = -1; dz <= 2; dz++) {
       for (let dx = -1; dx <= 2; dx++) {
         const k = (dz + 1) * 4 + (dx + 1);
-        const nl = this.lv(ix + dx, iz + dz, y, P);
+        let nl = this.lv(ix + dx, iz + dz, y, P);
+        // A neighbor drawn at a clearly different height belongs to another plate: treat it as empty,
+        // so the edge rounds off instead of stretching a wall between the two heights.
+        if (nl && (dx || dz) && Math.abs(nl.py - this.refY) > P.plateTol) nl = null;
         // Lumps are applied per cell, so heights and normals agree (and the toon steps show them).
-        this.hh[k] = nl ? nl.vis * lump((ix + dx + 0.5) * cell, (iz + dz + 0.5) * cell, amt) : -1;
+        this.hh[k] = nl ? Math.min(nl.vis, P.maxSnow * 1.6) * lump((ix + dx + 0.5) * cell, (iz + dz + 0.5) * cell, amt) : -1;
         this.yy[k] = nl ? nl.py : y;
       }
     }
@@ -160,7 +164,7 @@ export class BlanketRenderer {
         for (let dx = -1; dx <= 1; dx++) {
           if (!dx && !dz) continue;
           if (this.lv(l.ix + dx, l.iz + dz, l.y, P)) continue;
-          fr.add((l.ix + dx) + ',' + (l.iz + dz) + ',' + Math.round(l.y * 50));
+          fr.add((l.ix + dx) + ',' + (l.iz + dz) + ',' + Math.round(l.y * 200) + ',' + Math.round(l.py * 200));
         }
       }
     }
@@ -168,7 +172,7 @@ export class BlanketRenderer {
     let v = 0, i = 0;
     for (const l of t.levels) {
       if (!this.world.isLive(l, P)) continue;
-      this.gather(l.ix, l.iz, l.y, P);
+      this.gather(l.ix, l.iz, l.y, P, l.py);
       let any = false;
       for (let k = 0; k < 16; k++) if (this.hh[k] > EPS) { any = true; break; }
       if (!any) continue;
@@ -178,10 +182,10 @@ export class BlanketRenderer {
     }
     for (const key of fr) {
       const parts = key.split(',');
-      const ix = +parts[0], iz = +parts[1], y = +parts[2] / 50;
+      const ix = +parts[0], iz = +parts[1], y = +parts[2] / 200, py = +parts[3] / 200;
       // Fringe cells belong to the tile of their live neighbor, so a cell may appear in two tiles
       // at a tile border; both draw the same polygon, which is harmless.
-      this.gather(ix, iz, y, P);
+      this.gather(ix, iz, y, P, py);
       for (let c = 0; c < 4; c++) this.corner(c, ix, iz, y);
       const [nv, ni] = this.emit(t, v, i);
       v += nv; i += ni;

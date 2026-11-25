@@ -184,9 +184,10 @@ export class SnowWorld {
     }
   }
 
-  // Group certified cells into connected regions. Regions smaller than snowMinArea get no snow (monitor
-  // edges, cables, mugs). With snowLook 'plates' every region is drawn at one flat height (its median),
-  // which removes the depth wobble that made the blanket spiky.
+  // Group certified cells into connected regions (neighbors joined when their heights differ by less
+  // than plateStep, so a gentle slope stays one region but a table edge splits). Regions smaller than
+  // snowMinArea get no snow (monitor edges, cables, mugs). With snowLook 'plates' each region is drawn
+  // on its best-fit plane (slopes allowed), which removes the depth wobble that made the blanket spiky.
   plates(P) {
     const seen = new Set();
     const cell = this.cell, tol = P.levelMerge;
@@ -199,17 +200,35 @@ export class SnowWorld {
         const c = group[k];
         for (let d = 0; d < 4; d++) {
           const nl = this.levelAt(c.ix + (d === 0 ? 1 : d === 1 ? -1 : 0), c.iz + (d === 2 ? 1 : d === 3 ? -1 : 0), c.y, tol);
-          if (nl && nl.cert && !seen.has(nl)) { seen.add(nl); group.push(nl); }
+          if (nl && nl.cert && !seen.has(nl) && Math.abs(nl.y - c.y) <= P.plateStep) { seen.add(nl); group.push(nl); }
         }
       }
       const tiny = group.length * cell * cell < P.snowMinArea;
-      let py = 0;
+      // Least squares plane y = a x + b z + c (centered for stability).
+      let a = 0, b = 0, c0 = 0, mx = 0, mz = 0;
       if (flat && !tiny) {
-        const ys = group.map((g) => g.y).sort((a, b) => a - b);
-        py = ys[ys.length >> 1];
+        const n = group.length;
+        let my = 0;
+        for (const g of group) { mx += g.x; mz += g.z; my += g.y; }
+        mx /= n; mz /= n; my /= n;
+        let sxx = 0, szz = 0, sxz = 0, sxy = 0, szy = 0;
+        for (const g of group) {
+          const dx = g.x - mx, dz = g.z - mz, dy = g.y - my;
+          sxx += dx * dx; szz += dz * dz; sxz += dx * dz; sxy += dx * dy; szy += dz * dy;
+        }
+        const det = sxx * szz - sxz * sxz;
+        if (Math.abs(det) > 1e-9) { a = (sxy * szz - szy * sxz) / det; b = (szy * sxx - sxy * sxz) / det; }
+        // Surfaces steeper than about 25 degrees are not snow surfaces anyway: clamp the fit.
+        const sl = Math.hypot(a, b);
+        if (sl > 0.45) { a *= 0.45 / sl; b *= 0.45 / sl; }
+        c0 = my;
       }
       for (const g of group) {
-        const ny = flat && !tiny ? py : g.y;
+        let ny = g.y;
+        if (flat && !tiny) {
+          ny = c0 + a * (g.x - mx) + b * (g.z - mz);
+          if (Math.abs(ny - g.y) > 0.06) ny = g.y;   // bad fit here: keep the measured height
+        }
         if (g.tiny !== tiny || Math.abs(g.py - ny) > 0.002) { g.tiny = tiny; g.py = ny; this.markDirty(g); }
       }
     }

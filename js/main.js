@@ -30,7 +30,7 @@ const ui = {
   landing: $('landing'), desk: $('desk'), phone: $('phone'), hud: $('hud'), status: $('status'),
   startAR: $('startAR'), startPreview: $('startPreview'), deskPreview: $('deskPreview'), noAR: $('noAR'), arHint: $('arHint'),
   placeBtn: $('placeBtn'), resetBtn: $('resetBtn'), exitBtn: $('exitBtn'), devPill: $('devPill'), panel: $('panel'), overlay: $('overlay'),
-  pageBtn: $('pageBtn'), skipBtn: $('skipBtn'), frame: $('neonFrame'),
+  pageBtn: $('pageBtn'), skipBtn: $('skipBtn'), frame: $('neonFrame'), optBtn: $('optBtn'),
 };
 
 // ---------- landing ----------
@@ -354,6 +354,7 @@ async function startAR() {
 const vp = new THREE.Vector4();
 function onXRFrame(t, frame) {
   if (!frame) return;
+  renderer.setClearColor(0x000000, 0);
   const now = t / 1000;
   const dt = Math.min(0.1, lastT ? now - lastT : 1 / 30);
   lastT = now;
@@ -647,7 +648,13 @@ addEventListener('resize', () => {
 
 // ---------- buttons ----------
 function noXRSelect(el) { el.addEventListener('beforexrselect', (e) => e.preventDefault()); }
-[ui.placeBtn, ui.resetBtn, ui.exitBtn, ui.status, ui.pageBtn, ui.skipBtn].forEach(noXRSelect);
+[ui.placeBtn, ui.resetBtn, ui.exitBtn, ui.status, ui.pageBtn, ui.skipBtn, ui.optBtn].forEach(noXRSelect);
+// Options: opens the tuning panel (and the dev pill) during the test phase.
+ui.optBtn.addEventListener('click', () => {
+  ui.panel.hidden = !ui.panel.hidden;
+  ui.devPill.hidden = ui.panel.hidden && !DEV;
+  ui.optBtn.classList.toggle('on', !ui.panel.hidden);
+});
 
 function startScreenSearch() {
   show.stop();

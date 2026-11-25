@@ -5,7 +5,7 @@ Snow settles on real floors, tables and shelves (found through ARCore depth), an
 things moving through it knock it loose. A placed 3D logo has snow caps that get knocked off too.
 Cel-shaded in CI colors. iPhones and desktops get a 3D preview room with simulated people.
 
-Version 0.3.1.
+Version 0.3.2.
 
 ## Map
 
@@ -83,7 +83,8 @@ Optional: `assets/models/` for local copies of the segmentation models (otherwis
 
 ## Dev panel quick guide (`?dev`, or long press the status pill)
 
-- **How to get it on the phone:** open the page with `?dev` (for example `https://ppsk22.github.io/beyond-snow-ar/?dev`), or long press the status pill at the top for about a second. A desktop page opened with `?dev` now puts `?dev` into its QR code too.
+- **Options button** (v0.3.2): in AR and in the preview there is an **Options** button in the bottom row. It opens this panel and the dev pill. Close it with Options again or the panel's Close.
+- **Also:** open the page with `?dev` (for example `https://ppsk22.github.io/beyond-snow-ar/?dev`), or long press the status pill at the top for about a second. A desktop page opened with `?dev` now puts `?dev` into its QR code too.
 
 - **Masking > ML person cutout:** on/off. **Model:** deeplab (whole bodies, slower), selfie (fast, best for close people), multiclass.
 - **Masking > Debug overlay:** `mask` tints what the model sees as person in neon, `depth` shows the depth map (warm = near, red = no depth). Use these to check alignment. If the mask or cutout is upside down, tick **Flip camera image**.
@@ -94,7 +95,8 @@ Optional: `assets/models/` for local copies of the segmentation models (otherwis
 
 ## Expected bugs and caveats
 
-- **v0.3.1 look change:** "plates" (default) draws every connected snowy region at one flat height and gives regions under 0.09 m2 no snow at all. Slanted surfaces (a ramp, a sloped lid) then look stepped; switch Look to "detail" to compare.
+- **v0.3.2 look:** "plates" (default) draws every connected snowy region on its best-fit plane (gentle slopes like a duvet stay one smooth sheet) and gives regions under 0.09 m2 no snow. Neighbors at clearly different heights are kept apart, so no walls or spikes get stretched between them.
+- **v0.3.1 had a spike bug:** regions crept up slopes cell by cell and were then drawn at a height far from parts of them, which made tall spikes; their steep sides were drawn in the black outline colour. Right in front of the lens such a spike can fill the screen black. Fixed in v0.3.2.
 - **Kick-up toned down:** half of the knocked snow is now pushed into a low ring around the hole, at most 2 chunks per cell fly, lower and shorter.
 - **2-tap fallback** assumes an upright screen; a strongly tilted laptop lid comes out a bit off.
 - **Screen show untested on a phone.** In the preview room the finder locks onto the monitor within millimetres of the true size, and the whole show runs. On a real phone the neon on a real monitor looks different through the camera (exposure, moire, glare); the thresholds are in "Screen detection".

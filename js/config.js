@@ -84,8 +84,10 @@ export const P = {
   flakeOutline: 0.22,     // outline share of the flake radius
 
   // Snow look
-  snowLook: 'plates',     // plates: every surface region at one flat height | detail: follows the measured heights
+  snowLook: 'plates',     // plates: every surface region on its best-fit plane | detail: follows the measured heights
   snowMinArea: 0.09,      // m2: regions smaller than this get no snow (about 30 x 30 cm)
+  plateTol: 0.035,        // m: drawn heights of neighbors further apart than this are treated as separate plates
+  plateStep: 0.025,       // m: neighbor cells closer than this in height belong to the same region
 
   // Accumulation
   ambientRate: 0.0016,    // m of snow per second on certified surfaces (invisible snowfall)
@@ -215,6 +217,8 @@ export const SCHEMA = [
   ['Accumulation', [
     ['snowLook', 'Look', ['plates', 'detail']],
     ['snowMinArea', 'Smallest snowy area (m2)', 0, 0.5, 0.01],
+    ['plateTol', 'Plate height tolerance (m)', 0.01, 0.1, 0.005],
+    ['plateStep', 'Region step (m)', 0.005, 0.08, 0.005],
     ['ambientRate', 'Invisible snowfall', 0, 0.01, 0.0001],
     ['patchSpeed', 'Patch spread speed', 0.005, 0.5, 0.005],
     ['patchScale', 'Patch size (bigger = smaller)', 0.5, 8, 0.1],

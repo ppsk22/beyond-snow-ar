@@ -55,6 +55,7 @@ h1 { font-size: clamp(34px, 9vw, 64px); line-height: 1.02; margin: 0; font-weigh
 }
 #hud .pill { pointer-events: auto; }
 #placeBtn.on, #pageBtn.on { background: var(--neon); }
+#hud #optBtn.on { background: var(--neon); color: var(--ink); }
 /* On top of a camera feed (or white snow) ghost buttons disappear: solid in the HUD. */
 #hud .pill.ghost { background: var(--ink); color: var(--paper); border-color: var(--paper); }
 #hud .pill:not(.ghost) { box-shadow: 0 0 0 2px var(--paper); }

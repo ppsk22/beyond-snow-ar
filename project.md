@@ -1,6 +1,6 @@
 ---
 project: BEYOND THE BUZZ AR snow
-status: prototype v0.3.1
+status: prototype v0.3.2
 deadline: 2026-12-07
 tags: [beyond-global, christmas-2026, webxr, ar]
 ---
@@ -37,6 +37,8 @@ tags: [beyond-global, christmas-2026, webxr, ar]
 - 2026-11-25: v0.3.0. More dramatic knock-off. Screen show: desktop page gets a neon frame, phone finds it (camera image + depth), then snow, logo E / O / 0 and buzzword pills come out of the screen, land and tip over, pills break into letters when walked through or tapped. Simple scrollable 3D page with throwable pills. Config field in the panel. Floor-first surface confirmation as a dev option (neon square, tap to confirm, long press to remove; confirmed floor is flat and endless). Show objects as thin 2D cut-outs. Preview smoke test covers the screen lock
 
 - 2026-11-25: phone test of v0.3 (GitHub Pages): snow still shard-like, too much flying snow, person interaction weak (ML was off), screen finding failed, options not reachable (QR dropped ?dev). v0.3.1: flat plate look with minimum area (or detail look), calmer kick-up with a pushed-aside ring, thicker neon frame, more tolerant detection, 2-tap fallback, QR keeps ?dev
+
+- 2026-11-25: phone test of v0.3.1: screen detection works, but black screen and black spikes in the snow (plate regions crept up slopes, drawn far from their real height, steep sides in outline black). v0.3.2: regions grow only across small height steps and sit on a best-fit plane, neighbors at different heights kept apart, Options button in the HUD, transparent AR clear every frame
 
 ## To-dos
 - [ ] Decide hosting: GitHub Pages (ppsk22) or a WordPress subfolder with HTTPS
