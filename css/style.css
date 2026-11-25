@@ -1,0 +1,75 @@
+:root {
+  --ink: #0b0b0b;
+  --paper: #ffffff;
+  --neon: #c6ff00;
+  --stroke: 3px;
+  --font: "Euclid Circular B", "Reddit Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: var(--ink); color: var(--paper); font-family: var(--font); }
+body { overflow: hidden; -webkit-tap-highlight-color: transparent; }
+
+#snow2d { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+#gl { position: fixed; inset: 0; z-index: 1; touch-action: none; }
+#overlay { position: fixed; inset: 0; z-index: 4; pointer-events: none; }
+#overlay > * { pointer-events: auto; }
+
+#landing {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 24px; text-align: center; gap: 18px; background: var(--ink);
+}
+#landing section { display: flex; flex-direction: column; align-items: center; gap: 18px; max-width: 520px; }
+.brand {
+  font-weight: 900; letter-spacing: 0.04em; font-size: 15px; padding: 8px 16px;
+  border: var(--stroke) solid var(--paper); border-radius: 999px;
+}
+h1 { font-size: clamp(34px, 9vw, 64px); line-height: 1.02; margin: 0; font-weight: 900; width: fit-content; }
+.lead { font-size: 18px; margin: 0; opacity: 0.85; }
+.hint { font-size: 15px; margin: 0; opacity: 0.75; max-width: 340px; }
+.warn { color: var(--neon); opacity: 1; }
+
+.pill {
+  font: inherit; font-weight: 800; font-size: 16px; color: var(--ink); background: var(--paper);
+  border: var(--stroke) solid var(--ink); border-radius: 999px; padding: 12px 22px; cursor: pointer;
+}
+.pill.ghost { background: transparent; color: var(--paper); border-color: var(--paper); }
+.pill.big {
+  background: var(--neon); font-size: 26px; padding: 22px 46px; display: flex; flex-direction: column; align-items: center;
+  box-shadow: 0 0 0 var(--stroke) var(--paper); animation: nudge 1.8s ease-in-out infinite;
+}
+.pill.big .tap { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.7; }
+@keyframes nudge { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+
+.qr-wrap { background: var(--paper); padding: 18px; border-radius: 28px; border: var(--stroke) solid var(--paper); }
+#qr svg { display: block; width: min(280px, 60vw); height: auto; }
+
+#hud { position: absolute; inset: 0; pointer-events: none; }
+#hud .top { position: absolute; top: max(14px, env(safe-area-inset-top)); left: 0; right: 0; display: flex; justify-content: center; }
+#hud .bottom {
+  position: absolute; bottom: max(18px, env(safe-area-inset-bottom)); left: 0; right: 0;
+  display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; padding: 0 12px;
+}
+#hud .pill { pointer-events: auto; }
+#placeBtn.on { background: var(--neon); }
+/* On top of a camera feed (or white snow) ghost buttons disappear: solid in the HUD. */
+#hud .pill.ghost { background: var(--ink); color: var(--paper); border-color: var(--paper); }
+#hud .pill:not(.ghost) { box-shadow: 0 0 0 2px var(--paper); }
+.pill.chrome { background: var(--paper); text-decoration: none; display: inline-block; }
+.status { font-size: 14px; padding: 9px 16px; max-width: 92vw; }
+.dev {
+  position: absolute; left: 10px; top: max(64px, calc(env(safe-area-inset-top) + 54px)); font-size: 11px;
+  padding: 6px 10px; font-family: ui-monospace, monospace; font-weight: 600; white-space: pre; text-align: left; opacity: 0.9;
+}
+
+#panel {
+  position: absolute; right: 8px; top: 8px; bottom: 8px; width: min(340px, 92vw); overflow: auto;
+  background: rgba(11, 11, 11, 0.92); color: var(--paper); border: 2px solid var(--paper); border-radius: 16px;
+  font-size: 13px; padding: 10px; z-index: 10;
+}
+.tuner-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.tuner-head button { font: inherit; font-size: 12px; margin-left: 4px; padding: 4px 8px; border-radius: 999px; border: 1.5px solid var(--paper); background: transparent; color: var(--paper); }
+.tuner-body summary { font-weight: 800; padding: 6px 0; cursor: pointer; }
+.tuner-row { display: grid; grid-template-columns: 1fr 1fr 48px; gap: 6px; align-items: center; padding: 2px 0; }
+.tuner-row output { text-align: right; font-family: ui-monospace, monospace; font-size: 11px; }
