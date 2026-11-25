@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0b0b">
+  <title>BEYOND THE BUZZ: Let it snow</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 10 10%22%3E%3Ccircle cx=%225%22 cy=%225%22 r=%224%22 fill=%22%23c6ff00%22/%3E%3C/svg%3E">
+</head>
+<body>
+  <canvas id="snow2d" aria-hidden="true"></canvas>
+
+  <!-- Everything inside #overlay stays visible on top of the AR camera view (WebXR DOM overlay). -->
+  <div id="overlay">
+    <main id="landing">
+      <div class="brand" data-snowcap="6">BEYOND THE BUZZ</div>
+
+      <section id="desk" hidden>
+        <h1>Let it snow<br>in your room.</h1>
+        <p class="lead">Scan with your phone. The snow follows you off this screen and into the room.</p>
+        <div class="qr-wrap" data-snowcap="7"><div id="qr"></div></div>
+        <button id="deskPreview" class="pill ghost" type="button">Or try the 3D preview here</button>
+      </section>
+
+      <section id="phone" hidden>
+        <h1>Let it snow<br>in your room.</h1>
+        <button id="startAR" class="pill big" type="button" data-snowcap="9">
+          <span class="tap">Tap here</span>
+          <span>Start AR</span>
+        </button>
+        <p class="hint" id="arHint">Allow the camera, then slowly move your phone around the room. Snow settles on floors and tables. People walking through knock it loose.</p>
+        <p class="hint warn" id="noAR" hidden>Room AR works in Chrome on Android. On this phone you get the 3D preview.</p>
+        <a class="pill chrome" id="openChrome" hidden>Open in Chrome for room AR</a>
+        <button id="startPreview" class="pill ghost" type="button">3D preview instead</button>
+      </section>
+    </main>
+
+    <div id="hud" hidden>
+      <div class="top">
+        <div class="pill status" id="status">Starting</div>
+      </div>
+      <div class="bottom">
+        <button id="placeBtn" class="pill" type="button">Place logo</button>
+        <button id="resetBtn" class="pill ghost" type="button">Reset</button>
+        <button id="exitBtn" class="pill ghost" type="button">Exit</button>
+      </div>
+      <div class="pill dev" id="devPill" hidden></div>
+    </div>
+
+    <div id="panel" hidden></div>
+  </div>
+
+  <script type="importmap">
+    { "imports": { "three": "./js/vendor/three.module.js" } }
+  </script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

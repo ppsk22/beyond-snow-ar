@@ -1,0 +1,14 @@
+{
+  "name": "beyond-snow-ar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BEYOND THE BUZZ: WebXR snow in your room (Android Chrome) with a 3D preview fallback.",
+  "scripts": {
+    "serve": "python3 -m http.server 8777",
+    "vendor": "cp node_modules/three/build/three.module.js node_modules/three/build/three.core.js js/vendor/ && cp node_modules/three/examples/jsm/loaders/SVGLoader.js node_modules/three/examples/jsm/utils/BufferGeometryUtils.js js/vendor/addons/ && cp node_modules/qrcode-generator/dist/qrcode.mjs js/vendor/"
+  },
+  "devDependencies": {
+    "three": "0.187.0",
+    "qrcode-generator": "^2.0.4"
+  }
+}
