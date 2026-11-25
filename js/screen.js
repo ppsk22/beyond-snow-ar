@@ -31,7 +31,31 @@ export class ScreenFinder {
     this.quadScene.add(q);
   }
 
-  start() { this.state = 'search'; this.history.length = 0; this.pose = null; this.info = 'looking for the frame'; }
+  start(now = 0) { this.state = 'search'; this.history.length = 0; this.pose = null; this.info = 'looking for the frame'; this.startT = now; this.taps = []; this.manual = false; }
+
+  // 2-tap fallback: top-left corner, then bottom-right corner of the screen, as rays from taps.
+  // The screen plane comes from depth samples between the two taps; the screen is assumed upright.
+  tap(ray, df, P) {
+    if (this.state !== 'search') return null;
+    this.taps.push({ o: ray.ray.origin.clone(), d: ray.ray.direction.clone(), uv: this.toView(df, ray) });
+    if (this.taps.length < 2) { this.info = 'now tap the bottom-right corner'; return null; }
+    const [a, b] = this.taps;
+    this.taps = [];
+    const pts = [a.uv, [b.uv[0], a.uv[1]], b.uv, [a.uv[0], b.uv[1]]];
+    // Plane from depth inside the tapped rectangle (same fit as the automatic path).
+    const pose = this.solve(df, pts, P, [a, b]);
+    if (!pose) { this.info = 'could not measure the screen, tap the two corners again'; return null; }
+    this.pose = pose;
+    this.state = 'locked';
+    this.info = `locked by taps ${pose.w.toFixed(2)} x ${pose.h.toFixed(2)} m`;
+    return pose;
+  }
+
+  // Normalized view coords of a world ray direction in the current frame.
+  toView(df, ray) {
+    const p = ray.ray.origin.clone().add(ray.ray.direction).applyMatrix4(df.view).applyMatrix4(df.proj);
+    return [(p.x + 1) / 2, (1 - p.y) / 2];
+  }
   stop() { this.state = 'off'; this.pose = null; }
 
   // Read the camera texture as a small upright RGBA image (row 0 = top).
@@ -75,6 +99,17 @@ export class ScreenFinder {
         ok = hu >= hMin && hu <= hMax ? 1 : 0;
       }
       msk[i] = ok;
+    }
+    // Grow the mask by one pixel: a thin frame seen from afar breaks into pieces otherwise.
+    if (!this.msk2 || this.msk2.length !== n) this.msk2 = new Uint8Array(n);
+    const m2 = this.msk2;
+    m2.set(msk);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        if (m2[i]) continue;
+        if (m2[i - 1] || m2[i + 1] || m2[i - w] || m2[i + w]) msk[i] = 1;
+      }
     }
     lab.fill(0);
     let best = null, label = 0;
@@ -121,7 +156,7 @@ export class ScreenFinder {
   }
 
   // Fit the screen plane to depth samples inside the quad, intersect the corner rays.
-  solve(df, pts, P) {
+  solve(df, pts, P, tapRays) {
     const inside = (u, v) => {
       let s = 0;
       for (let k = 0; k < 4; k++) {
@@ -178,16 +213,36 @@ export class ScreenFinder {
       pc = origin.clone().addScaledVector(dir.normalize(), dist);
       this.info = 'no depth on screen, assumed size';
     }
-    const corners = [];
-    for (const p of pts) {
-      this.ray(df, p[0], p[1], origin, dir);
-      const den = normal.dot(dir);
+    const hitPlane = (o, d) => {
+      const den = normal.dot(d);
       if (Math.abs(den) < 1e-4) return null;
-      const t = normal.dot(new THREE.Vector3().subVectors(pc, origin)) / den;
-      if (t <= 0) return null;
-      corners.push(origin.clone().addScaledVector(dir, t));
+      const t = normal.dot(new THREE.Vector3().subVectors(pc, o)) / den;
+      return t > 0 ? o.clone().addScaledVector(d, t) : null;
+    };
+    let TL, TR, BR, BL;
+    if (tapRays) {
+      // Manual: two diagonal corners; the other two from an upright screen in that plane.
+      const A = hitPlane(tapRays[0].o, tapRays[0].d), B = hitPlane(tapRays[1].o, tapRays[1].d);
+      if (!A || !B) return null;
+      const n = normal.clone();
+      if (n.dot(new THREE.Vector3().subVectors(df.camPos, A)) < 0) n.negate();
+      const upv = new THREE.Vector3(0, 1, 0).addScaledVector(n, -n.y).normalize();
+      const rv = new THREE.Vector3().crossVectors(upv, n).normalize();
+      const diag = new THREE.Vector3().subVectors(B, A);
+      const wv = diag.dot(rv), hv = -diag.dot(upv);
+      TL = A; BR = B;
+      TR = A.clone().addScaledVector(rv, wv);
+      BL = A.clone().addScaledVector(upv, -hv);
+    } else {
+      const corners = [];
+      for (const p of pts) {
+        this.ray(df, p[0], p[1], origin, dir);
+        const c = hitPlane(origin, dir);
+        if (!c) return null;
+        corners.push(c);
+      }
+      [TL, TR, BR, BL] = corners;
     }
-    const [TL, TR, BR, BL] = corners;
     const right = new THREE.Vector3().subVectors(TR, TL).add(new THREE.Vector3().subVectors(BR, BL)).normalize();
     let up = new THREE.Vector3().subVectors(TL, BL).add(new THREE.Vector3().subVectors(TR, BR)).normalize();
     // The phone can be rotated: whichever corner pair is higher in the world is the top.

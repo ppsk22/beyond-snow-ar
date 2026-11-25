@@ -1,6 +1,6 @@
 ---
 project: BEYOND THE BUZZ AR snow
-status: prototype v0.3.0
+status: prototype v0.3.1
 deadline: 2026-12-07
 tags: [beyond-global, christmas-2026, webxr, ar]
 ---
@@ -36,6 +36,8 @@ tags: [beyond-global, christmas-2026, webxr, ar]
 
 - 2026-11-25: v0.3.0. More dramatic knock-off. Screen show: desktop page gets a neon frame, phone finds it (camera image + depth), then snow, logo E / O / 0 and buzzword pills come out of the screen, land and tip over, pills break into letters when walked through or tapped. Simple scrollable 3D page with throwable pills. Config field in the panel. Floor-first surface confirmation as a dev option (neon square, tap to confirm, long press to remove; confirmed floor is flat and endless). Show objects as thin 2D cut-outs. Preview smoke test covers the screen lock
 
+- 2026-11-25: phone test of v0.3 (GitHub Pages): snow still shard-like, too much flying snow, person interaction weak (ML was off), screen finding failed, options not reachable (QR dropped ?dev). v0.3.1: flat plate look with minimum area (or detail look), calmer kick-up with a pushed-aside ring, thicker neon frame, more tolerant detection, 2-tap fallback, QR keeps ?dev
+
 ## To-dos
 - [ ] Decide hosting: GitHub Pages (ppsk22) or a WordPress subfolder with HTTPS
 - [x] First device run (USB)
@@ -43,7 +45,8 @@ tags: [beyond-global, christmas-2026, webxr, ar]
 - [ ] Check depth mask with Debug overlay "depth": does it line up with the room?
 - [ ] Switch on ML person cutout: note the dev pill (mask state, model, ms), check overlay "mask", try deeplab vs selfie
 - [ ] Report how long snow takes to appear with the strict check, and whether wrong spots are gone
-- [ ] Screen show on the real monitor: does it lock (dev pill `screen ...`)? Size right?
+- [ ] Screen show on the real monitor: does it lock (dev pill `screen ...`)? Size right? If not, try the 2-tap fallback
+- [ ] Compare snow Look plates vs detail; turn on ML person cutout and walk through
 - [ ] Tune the mix, sizes and speeds in the panel, send the config JSON
 - [ ] Decide: keep the 3D page or drop it
 - [ ] Test floor confirmation: how fast does the square appear, does the tap hit it, does long press remove it

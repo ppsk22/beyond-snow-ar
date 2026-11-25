@@ -79,7 +79,7 @@ export class BlanketRenderer {
         const nl = this.lv(ix + dx, iz + dz, y, P);
         // Lumps are applied per cell, so heights and normals agree (and the toon steps show them).
         this.hh[k] = nl ? nl.vis * lump((ix + dx + 0.5) * cell, (iz + dz + 0.5) * cell, amt) : -1;
-        this.yy[k] = nl ? nl.y : y;
+        this.yy[k] = nl ? nl.py : y;
       }
     }
   }

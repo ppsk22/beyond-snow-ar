@@ -63,9 +63,10 @@ export const P = {
   knockMaxH: 1.0,         // and below this height above the level
   knockMinPts: 1,         // dynamic samples needed in a column neighborhood
   knockRadius: 3,         // in cells: neighbors that also lose snow (dramatic: everything under a foot goes)
-  knockUp: 1.8,           // upward kick
-  knockSide: 1.6,         // sideways kick along the intrusion direction
-  knockRandom: 0.6,
+  knockUp: 0.7,           // upward kick
+  knockSide: 0.9,         // sideways kick along the intrusion direction
+  knockRandom: 0.3,
+  knockBerm: 0.5,         // share of the removed snow pushed into a ring around the hole instead of flying
   knockEdge: 1.0,         // how much snow the edge of a knock-off hole loses (0 = soft rim stays)
   knockPersonAll: true,   // with the ML mask: all snow under a detected person goes, no height band
 
@@ -82,15 +83,19 @@ export const P = {
   flakeSizeVar: 0.5,
   flakeOutline: 0.22,     // outline share of the flake radius
 
+  // Snow look
+  snowLook: 'plates',     // plates: every surface region at one flat height | detail: follows the measured heights
+  snowMinArea: 0.09,      // m2: regions smaller than this get no snow (about 30 x 30 cm)
+
   // Accumulation
   ambientRate: 0.0016,    // m of snow per second on certified surfaces (invisible snowfall)
   patchSpeed: 0.06,       // how fast patches spread after certification (1 / s)
   patchScale: 2.4,        // patch noise frequency (1 / m): bigger = smaller, more patches
   patchSoft: 4,           // how hard patch edges grow in
   flakeDeposit: 0.004,    // m of snow per landed flake (spread over a few cells)
-  maxSnow: 0.045,
-  smoothEvery: 0.5,       // s between smoothing passes
-  smooth: 0.18,
+  maxSnow: 0.035,
+  smoothEvery: 0.3,       // s between smoothing passes
+  smooth: 0.4,
   freshFade: 1.2,         // s for a new pile to grow in visually
 
   // Knocked-off chunks
@@ -98,7 +103,8 @@ export const P = {
   chunkSize: 0.012,
   gravity: 6.0,           // a bit softer than real gravity, reads better on a phone
   drag: 1.6,
-  chunkLife: 6,
+  chunkLife: 3,
+  chunkMax: 2,            // flying chunks per cell that loses snow
   chunkStickSpeed: 1.2,   // chunks slower than this re-settle on surfaces
 
   // Push (falling snow pushed by moving things)
@@ -116,7 +122,7 @@ export const P = {
   toonSteps: 3,
   shadeGain: 7,           // how quickly snow bumps facing away from the light fall into the shade band
   outlineWidth: 0.6,      // how steep a snow edge must turn away before it gets the outline (bigger = fewer lines)
-  lumps: 0.7,            // height variation of the snow blanket (0 = perfectly flat)
+  lumps: 0.3,            // height variation of the snow blanket (0 = perfectly flat)
   occlusionOn: true,
   occlusionBias: 0.04,
   occlusionBiasRel: 0.015,
@@ -138,14 +144,15 @@ export const P = {
   screenMode: true,       // start every AR / preview session by looking for the screen
   findHz: 5,              // detection attempts per second
   findWidth: 320,         // camera image width used for detection
-  findHueMin: 50,         // neon window (degrees, saturation, value)
-  findHueMax: 115,
-  findSat: 0.45,
-  findVal: 0.45,
+  findHueMin: 42,         // neon window (degrees, saturation, value); tolerant: cameras wash neon out
+  findHueMax: 135,
+  findSat: 0.28,
+  findVal: 0.32,
   findMinPx: 0.004,       // smallest frame (share of image pixels)
   findMinArea: 0.015,     // smallest frame quad (share of the image)
   findLock: 3,            // consistent detections in a row before it locks
   findAssumeW: 0.6,       // m: screen width assumed when the screen has no depth
+  findTapAfter: 6,        // s without a lock before the 2-tap fallback is offered (0 = never)
   burstCount: 14,         // objects in the opening burst
   burstTime: 2.0,
   dropEvery: 2.5,         // s between steady drops (0 = off)
@@ -206,6 +213,8 @@ export const SCHEMA = [
     ['spawnRadius', 'Snow box radius', 1, 6, 0.1],
   ]],
   ['Accumulation', [
+    ['snowLook', 'Look', ['plates', 'detail']],
+    ['snowMinArea', 'Smallest snowy area (m2)', 0, 0.5, 0.01],
     ['ambientRate', 'Invisible snowfall', 0, 0.01, 0.0001],
     ['patchSpeed', 'Patch spread speed', 0.005, 0.5, 0.005],
     ['patchScale', 'Patch size (bigger = smaller)', 0.5, 8, 0.1],
@@ -245,6 +254,8 @@ export const SCHEMA = [
     ['knockMinPts', 'Points needed', 1, 10, 1],
     ['knockRadius', 'Radius (cells)', 0, 5, 1],
     ['knockEdge', 'Hole edge strength', 0, 1, 0.05],
+    ['knockBerm', 'Pushed aside (not flying)', 0, 1, 0.05],
+    ['chunkMax', 'Flying chunks per cell', 0, 12, 1],
     ['knockPersonAll', 'Person clears everything (ML)'],
     ['knockUp', 'Up kick', 0, 4, 0.05],
     ['knockSide', 'Side kick', 0, 4, 0.05],
@@ -316,6 +327,7 @@ export const SCHEMA = [
     ['findVal', 'Brightness min', 0, 1, 0.01],
     ['findLock', 'Detections to lock', 1, 10, 1],
     ['findAssumeW', 'Assumed width (m)', 0.2, 2, 0.01],
+    ['findTapAfter', 'Offer 2 taps after (s)', 0, 30, 1],
   ]],
   ['Masking', [
     ['occlusionOn', 'Depth mask'],

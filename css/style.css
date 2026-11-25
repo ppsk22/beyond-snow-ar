@@ -13,7 +13,7 @@ body { overflow: hidden; -webkit-tap-highlight-color: transparent; }
 
 #snow2d { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
 /* Thick neon frame around the desktop page; the phone detects the screen by it. Keep it unbroken. */
-#neonFrame { position: fixed; inset: 0; pointer-events: none; z-index: 6; border: max(14px, 2.2vmin) solid var(--neon); }
+#neonFrame { position: fixed; inset: 0; pointer-events: none; z-index: 6; border: max(28px, 4.5vmin) solid var(--neon); }
 #gl { position: fixed; inset: 0; z-index: 1; touch-action: none; }
 #overlay { position: fixed; inset: 0; z-index: 4; pointer-events: none; }
 #overlay > * { pointer-events: auto; }

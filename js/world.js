@@ -110,7 +110,7 @@ export class SnowWorld {
       ix, iz, x: (ix + 0.5) * this.cell, z: (iz + 0.5) * this.cell, y,
       conf, noise: 0.01, snow: 0, vis: 0, sup: now, knockT: -1e9, intrudeT: -1e9,
       covered: false, idx: this.levels.length, tile: '', virtual: this.isVirtual, mv: 0,
-      firstT: now, views: 1, vcx: 0, vcy: 0, vcz: 0, cert: false, certT: 0, pn: -1, lockedBy: 0,
+      firstT: now, views: 1, vcx: 0, vcy: 0, vcz: 0, cert: false, certT: 0, pn: -1, lockedBy: 0, py: y, tiny: false,
     };
     l.tile = this.tileOf(l);
     arr.push(l);
@@ -181,6 +181,37 @@ export class SnowWorld {
     if (mx * mx + my * my + mz * mz > P.certViewDist * P.certViewDist) {
       l.views++;
       l.vcx = cam.x; l.vcy = cam.y; l.vcz = cam.z;
+    }
+  }
+
+  // Group certified cells into connected regions. Regions smaller than snowMinArea get no snow (monitor
+  // edges, cables, mugs). With snowLook 'plates' every region is drawn at one flat height (its median),
+  // which removes the depth wobble that made the blanket spiky.
+  plates(P) {
+    const seen = new Set();
+    const cell = this.cell, tol = P.levelMerge;
+    const flat = P.snowLook === 'plates';
+    for (const l of this.levels) {
+      if (l.virtual || !l.cert || seen.has(l)) continue;
+      const group = [l];
+      seen.add(l);
+      for (let k = 0; k < group.length; k++) {
+        const c = group[k];
+        for (let d = 0; d < 4; d++) {
+          const nl = this.levelAt(c.ix + (d === 0 ? 1 : d === 1 ? -1 : 0), c.iz + (d === 2 ? 1 : d === 3 ? -1 : 0), c.y, tol);
+          if (nl && nl.cert && !seen.has(nl)) { seen.add(nl); group.push(nl); }
+        }
+      }
+      const tiny = group.length * cell * cell < P.snowMinArea;
+      let py = 0;
+      if (flat && !tiny) {
+        const ys = group.map((g) => g.y).sort((a, b) => a - b);
+        py = ys[ys.length >> 1];
+      }
+      for (const g of group) {
+        const ny = flat && !tiny ? py : g.y;
+        if (g.tiny !== tiny || Math.abs(g.py - ny) > 0.002) { g.tiny = tiny; g.py = ny; this.markDirty(g); }
+      }
     }
   }
 
@@ -298,7 +329,7 @@ export class SnowWorld {
     }
   }
 
-  isLive(l) { return l.virtual || l.cert; }
+  isLive(l) { return l.virtual || (l.cert && !l.tiny); }
 
   // Find the highest live level whose snow top was crossed between yPrev and yNow.
   landing(x, z, yPrev, yNow, P) {
@@ -382,7 +413,9 @@ export class SnowWorld {
       l.intrudeT = now;
       const len = Math.hypot(dx, dz);
       if (len > 0) { dx /= len; dz /= len; }
-      // Soft hole: full removal in the middle, fading out toward the radius.
+      // Soft hole: full removal in the middle, fading out toward the radius. Part of the removed snow is
+      // pushed into a low ring just outside the hole (knockBerm) instead of flying.
+      let removedTotal = 0;
       for (let oz = -R; oz <= R; oz++) {
         for (let ox = -R; ox <= R; ox++) {
           const dd = Math.sqrt(ox * ox + oz * oz);
@@ -393,11 +426,29 @@ export class SnowWorld {
           if (frac > 0.5) nl.knockT = now;
           const amount = nl.vis * frac;
           if (amount > 0.001) {
-            emit(nl, amount, dx, dz);
+            emit(nl, amount * (1 - P.knockBerm), dx, dz);
+            removedTotal += amount;
             nl.vis -= amount; nl.snow = Math.max(0, nl.snow - amount);
             this.markDirty(nl);
             knocked++;
           }
+        }
+      }
+      if (P.knockBerm > 0 && removedTotal > 0) {
+        const ring = [];
+        const R1 = R + 1;
+        for (let oz = -R1 - 1; oz <= R1 + 1; oz++) {
+          for (let ox = -R1 - 1; ox <= R1 + 1; ox++) {
+            const dd = Math.sqrt(ox * ox + oz * oz);
+            if (dd < R + 0.6 || dd > R1 + 1.2) continue;
+            const nl = this.levelAt(l.ix + ox, l.iz + oz, l.y, P.levelMerge);
+            if (nl && this.isLive(nl, P)) ring.push(nl);
+          }
+        }
+        if (ring.length) {
+          const add = (removedTotal * P.knockBerm) / ring.length;
+          const cap = P.maxSnow * 1.5;
+          for (const nl of ring) { nl.snow = Math.min(cap, nl.snow + add); this.markDirty(nl); }
         }
       }
     }

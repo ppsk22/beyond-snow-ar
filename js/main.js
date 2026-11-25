@@ -50,7 +50,7 @@ function showLanding() {
 
 function makeQR() {
   const url = new URL(location.href);
-  url.search = '';
+  url.search = DEV ? '?dev' : '';
   url.hash = '';
   const qr = qrcode(0, 'M');
   qr.addData(url.toString());
@@ -122,6 +122,7 @@ show.words = WORDS;
 const page = new PagePanel(P, scene);
 const surf = new SurfaceConfirm(P, scene, world);
 let staticsT = 0;
+let platesT = 0;
 const screenSource = (pos, vel) => show.snowSource(pos, vel);
 
 const reticle = new THREE.Mesh(
@@ -202,6 +203,8 @@ function simulate(dt, now, haveDepth) {
     certT += dt;
     if (certT > 0.2) { certT = 0; world.certify(P, now, occ, (l) => chunks.drop(l, P, world.cell)); }
     surf.update(dt, now, df.camPos.y);
+    platesT += dt;
+    if (platesT > 0.5) { platesT = 0; world.plates(P); }
     if (gate && occ.nDyn) {
       world.knock(occ.dynPts, occ.nDyn, P, now, emitReal);
       if (logo.placed) logoWorld.knock(occ.dynPts, occ.nDyn, P, now, emitLogo);
@@ -265,7 +268,13 @@ function updateStatus() {
   const area = live * world.cell * world.cell;
   let msg;
   if (mode === 'ar' && !df.ok) msg = 'Looking for depth. Move the phone slowly';
-  else if (finder.state === 'search') msg = 'Point your phone at the screen with the neon frame';
+  else if (finder.state === 'search') {
+    const waited = performance.now() / 1000 - (finder.startT || 0);
+    if (finder.taps && finder.taps.length === 1) msg = 'Now tap the bottom-right corner of the screen';
+    else if (P.findTapAfter > 0 && waited > P.findTapAfter) msg = 'Can\'t find it. Tap the top-left corner of the screen';
+    else if (/no camera/.test(finder.info)) msg = 'No camera image for screen finding. Tap Skip';
+    else msg = 'Point your phone at the screen with the neon frame';
+  }
   else if (P.confirmMode && !surf.floor && surf.floorCand && surf.floorCand.mesh && surf.floorCand.mesh.visible) msg = 'Tap the neon square to confirm the floor';
   else if (P.confirmMode && !surf.floor && !show.active) msg = 'Look at the floor and move the phone a little';
   else if (area < 0.3) msg = 'Move your phone slowly to find surfaces';
@@ -481,6 +490,12 @@ function handleLongPress(ray) {
 
 // Shared tap logic (AR select or preview click): page pills, show objects, logo placement.
 function handleTap(ray, camPos) {
+  // Screen not found automatically: taps mark its corners.
+  if (ray && finder.state === 'search' && P.findTapAfter > 0 && performance.now() / 1000 - (finder.startT || 0) > P.findTapAfter && df.ok) {
+    const pose = finder.tap(ray, df, P);
+    if (pose) onScreenLocked(pose, performance.now() / 1000);
+    return;
+  }
   if (ray && P.confirmMode) {
     const c = surf.pickCandidate(ray);
     if (c) { surf.confirm(c, performance.now() / 1000); return; }
@@ -638,7 +653,7 @@ function startScreenSearch() {
   show.stop();
   page.show(false);
   ui.pageBtn.hidden = true;
-  if (P.screenMode) { finder.start(); ui.skipBtn.hidden = false; } else { finder.stop(); ui.skipBtn.hidden = true; }
+  if (P.screenMode) { finder.start(performance.now() / 1000); ui.skipBtn.hidden = false; } else { finder.stop(); ui.skipBtn.hidden = true; }
 }
 
 function resetWorld() {

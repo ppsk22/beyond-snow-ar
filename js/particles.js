@@ -182,7 +182,7 @@ export class Chunks {
     const r = P.chunkSize;
     const vol = (4 / 3) * Math.PI * r * r * r;
     let n = Math.ceil((amount * cell * cell) / vol);
-    n = Math.min(n, 12, cap);
+    n = Math.min(n, P.chunkMax, cap);
     const hasDir = dirX || dirZ;
     for (let k = 0; k < n; k++) {
       if (this.count >= this.max) return;

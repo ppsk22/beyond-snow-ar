@@ -1,6 +1,6 @@
 {
   "name": "beyond-snow-ar",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "BEYOND THE BUZZ: WebXR snow in your room (Android Chrome) with a 3D preview fallback.",
   "scripts": {
