@@ -1,11 +1,16 @@
 // Preview mode: a stylized room with walking people. Its depth is rendered into the same DepthFrame
 // format as WebXR depth (low resolution, with noise), so the whole snow pipeline runs unchanged.
 // Used for testing here and as the fallback on iPhones and desktops.
+// It mirrors the AR pipeline: the room is rendered into a "camera feed" texture that is shown as the
+// background (like the AR camera image), occlusion comes only from the depth prepass, and a perfect
+// person mask (with a little lag, like the ML model) feeds the person cutout.
 
 import * as THREE from 'three';
 import { toonMaterial } from './look.js';
+import { desktopPageTexture } from './screen.js';
 
 const SIM_LAYER = 1;
+const PEOPLE_LAYER = 2;
 
 export class SimRoom {
   constructor(scene, P) {
@@ -20,7 +25,7 @@ export class SimRoom {
     const add = (geo, mat, x, y, z) => {
       const m = new THREE.Mesh(geo, mat);
       m.position.set(x, y, z);
-      m.layers.enable(SIM_LAYER);
+      m.layers.set(SIM_LAYER);
       this.group.add(m);
       this.solids.push(m);
       return m;
@@ -39,6 +44,19 @@ export class SimRoom {
     add(new THREE.BoxGeometry(0.6, 0.4, 0.6), wood, -2.6, 0.2, 0.9);
     // shelf on the right wall
     add(new THREE.BoxGeometry(0.35, 0.03, 1.4), wood, 3.25, 1.1, 0.4);
+
+    // Desktop monitor on the table, showing the page with its neon frame (for the screen show).
+    const dark = toonMaterial({ base: '#202020', shade: '#111111', steps: 2 });
+    add(new THREE.BoxGeometry(0.66, 0.40, 0.035), dark, 1.3, 1.07, -1.53);
+    add(new THREE.BoxGeometry(0.06, 0.22, 0.05), dark, 1.3, 0.86, -1.56);
+    add(new THREE.BoxGeometry(0.26, 0.02, 0.18), dark, 1.3, 0.785, -1.52);
+    const screenMat = new THREE.MeshBasicMaterial({ map: desktopPageTexture(P.colNeon) });
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.35), screenMat);
+    scr.position.set(1.3, 1.07, -1.511);
+    scr.layers.set(SIM_LAYER);
+    this.group.add(scr);
+    this.solids.push(scr);
+    this.screenTruth = { center: new THREE.Vector3(1.3, 1.07, -1.511), w: 0.62, h: 0.35 };
 
     // People: torso + two swinging legs, walking along loops.
     const skin = toonMaterial({ base: '#c98f6b', shade: '#9c6a4e', steps: 3 });
@@ -64,9 +82,10 @@ export class SimRoom {
         pivot.add(leg);
         g.add(pivot);
         legs.push(pivot);
-        leg.layers.enable(SIM_LAYER);
+        leg.layers.set(SIM_LAYER);
+        leg.layers.enable(PEOPLE_LAYER);
       }
-      for (const m of [torso, head]) { m.layers.enable(SIM_LAYER); g.add(m); }
+      for (const m of [torso, head]) { m.layers.set(SIM_LAYER); m.layers.enable(PEOPLE_LAYER); g.add(m); }
       this.group.add(g);
       this.people.push({ g, legs, path: paths[k], seg: 0, t: k * 0.4, speed: 0.9 + k * 0.25, active: true });
     }
@@ -89,6 +108,84 @@ export class SimRoom {
     });
     this.time = 0;
     this.peopleOn = true;
+
+    // Camera feed: the room rendered into a texture, drawn as the background.
+    this.feed = null;
+    this.bgMat = new THREE.ShaderMaterial({
+      uniforms: { uTex: { value: null } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: 'uniform sampler2D uTex; varying vec2 vUv; void main(){ gl_FragColor = vec4(texture2D(uTex, vUv).rgb, 1.0); }',
+      depthTest: false, depthWrite: false,
+    });
+    this.bg = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.bgMat);
+    this.bg.frustumCulled = false;
+    this.bg.renderOrder = -2000;
+    scene.add(this.bg);
+    // Person mask
+    this.maskRT = null;
+    this.maskBuf = null;
+    this.maskQueue = [];
+    this.whiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  }
+
+  setVisible(v) { this.group.visible = v; this.bg.visible = v; }
+
+  renderFeed(renderer, scene, camera) {
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    if (!this.feed || this.feed.width !== size.x || this.feed.height !== size.y) {
+      this.feed?.dispose();
+      this.feed = new THREE.WebGLRenderTarget(size.x, size.y, { samples: 4 });
+      this.bgMat.uniforms.uTex.value = this.feed.texture;
+    }
+    const mask = camera.layers.mask;
+    const prev = renderer.getRenderTarget();
+    camera.layers.set(SIM_LAYER);
+    this.bg.visible = false;
+    renderer.setRenderTarget(this.feed);
+    renderer.setClearColor(0x1a1a1a, 1);
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(prev);
+    this.bg.visible = true;
+    camera.layers.mask = mask;
+    return this.feed.texture;
+  }
+
+  // Perfect person mask, delivered with a delay like a real segmentation model.
+  captureMask(renderer, scene, camera, P, personMask, now) {
+    const w = P.segWidth | 0;
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    const h = Math.max(16, Math.round(w * size.y / size.x));
+    if (!this.maskRT || this.maskRT.width !== w || this.maskRT.height !== h) {
+      this.maskRT?.dispose();
+      this.maskRT = new THREE.WebGLRenderTarget(w, h);
+      this.maskBuf = new Uint8Array(w * h * 4);
+    }
+    const mask = camera.layers.mask;
+    const prev = renderer.getRenderTarget();
+    camera.layers.set(PEOPLE_LAYER);
+    scene.overrideMaterial = this.whiteMat;
+    const bgVis = this.bg.visible;
+    this.bg.visible = false;
+    renderer.setRenderTarget(this.maskRT);
+    renderer.setClearColor(0x000000, 1);
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(prev);
+    scene.overrideMaterial = null;
+    this.bg.visible = bgVis;
+    camera.layers.mask = mask;
+    renderer.readRenderTargetPixels(this.maskRT, 0, 0, w, h, this.maskBuf);
+    const out = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const src = (h - 1 - y) * w;
+      for (let x = 0; x < w; x++) out[y * w + x] = this.maskBuf[(src + x) * 4];
+    }
+    this.maskQueue.push({ t: now, data: out, w, h });
+    // Hand out the newest mask that is at least simMaskLag old.
+    let pick = null;
+    while (this.maskQueue.length && now - this.maskQueue[0].t >= P.simMaskLag) pick = this.maskQueue.shift();
+    if (pick) { personMask.state = 'sim'; personMask.info = 'preview mask'; personMask.setMask(pick.data, pick.w, pick.h, pick.t); }
   }
 
   update(dt) {
@@ -120,6 +217,8 @@ export class SimRoom {
     const bg = scene.background;
     const prevTarget = renderer.getRenderTarget();
     camera.layers.set(SIM_LAYER);
+    const bgVis = this.bg.visible;
+    this.bg.visible = false;
     scene.overrideMaterial = this.depthMat;
     scene.background = null;
     renderer.setRenderTarget(this.rt);
@@ -129,6 +228,7 @@ export class SimRoom {
     renderer.setRenderTarget(prevTarget);
     scene.overrideMaterial = null;
     scene.background = bg;
+    this.bg.visible = bgVis;
     camera.layers.mask = mask;
     renderer.readRenderTargetPixels(this.rt, 0, 0, cols, rows, this.buf);
     df.resize(cols, rows);

@@ -22,6 +22,33 @@ export function createTuner(root, onChange) {
   }
   head.appendChild(btns);
   root.appendChild(head);
+  // Config field: the live JSON to copy, or paste one in and press Apply.
+  const cfg = document.createElement('div');
+  cfg.className = 'tuner-cfg';
+  const ta = document.createElement('textarea');
+  ta.spellcheck = false;
+  ta.rows = 4;
+  const row = document.createElement('div');
+  for (const [label, fn] of [
+    ['Copy', () => { ta.value = JSON.stringify(P); copy(ta.value); }],
+    ['Apply pasted', () => {
+      try { Object.assign(P, JSON.parse(ta.value)); save(); build(); onChange('*'); ta.classList.remove('bad'); } catch (e) { ta.classList.add('bad'); }
+    }],
+  ]) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.addEventListener('click', fn);
+    row.appendChild(b);
+  }
+  cfg.appendChild(ta);
+  cfg.appendChild(row);
+  root.appendChild(cfg);
+  let editing = false;
+  ta.addEventListener('focus', () => { editing = true; });
+  ta.addEventListener('blur', () => { editing = false; });
+  const refresh = () => { if (!editing && !root.hidden) ta.value = JSON.stringify(P); };
+  setInterval(refresh, 1000);
+  refresh();
   const body = document.createElement('div');
   body.className = 'tuner-body';
   root.appendChild(body);
@@ -43,7 +70,12 @@ export function createTuner(root, onChange) {
         row.appendChild(name);
         const val = document.createElement('output');
         let input;
-        if (typeof P[key] === 'boolean') {
+        if (Array.isArray(min)) {
+          input = document.createElement('select');
+          for (const o of min) { const op = document.createElement('option'); op.value = op.textContent = o; input.appendChild(op); }
+          input.value = P[key];
+          input.addEventListener('change', () => { P[key] = input.value; onChange(key); });
+        } else if (typeof P[key] === 'boolean') {
           input = document.createElement('input');
           input.type = 'checkbox';
           input.checked = P[key];

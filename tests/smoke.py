@@ -28,7 +28,7 @@ async def main():
         await pg.wait_for_timeout(1500)
         await pg.screenshot(path=f'{OUT}/1_landing.png')
         await pg.evaluate("document.getElementById('startAR').click()")
-        await pg.evaluate("__bsar.sim.peopleOn=false; __bsar.placeLogoAt(-0.5,0,0.9)")
+        await pg.evaluate("__bsar.finder.stop(); __bsar.sim.peopleOn=false; __bsar.placeLogoAt(-0.5,0,0.9)")
         for i in range(40):
             await pg.evaluate(f"__bsar.look.yaw={math.sin(i / 40 * 6.28) * 0.6}; __bsar.look.pitch=-0.5")
             await pg.wait_for_timeout(150)
@@ -37,6 +37,15 @@ async def main():
         await pg.wait_for_timeout(12000)
         await pg.screenshot(path=f'{OUT}/2_people.png')
         s = json.loads(await pg.evaluate("JSON.stringify({area:__bsar.liveArea(), vol:__bsar.snowVolume(), work:__bsar.stats.work, knocks:__bsar.stats.knocks, logo:__bsar.logoWorld.levels.length})"))
+        # Screen show: look at the preview monitor, the finder must lock onto it with the right size.
+        await pg.evaluate("__bsar.finder.start(); __bsar.camera.position.set(1.15,1.35,0.2); __bsar.look.yaw=0; __bsar.look.pitch=-0.25")
+        for i in range(20):
+            await pg.wait_for_timeout(500)
+            if await pg.evaluate("__bsar.finder.state") == 'locked': break
+        scr = json.loads(await pg.evaluate("JSON.stringify(__bsar.finder.pose ? {w:__bsar.finder.pose.w, h:__bsar.finder.pose.h, dz:Math.abs(__bsar.finder.pose.center.z-__bsar.sim.screenTruth.center.z)} : null)"))
+        await pg.wait_for_timeout(4000)
+        s['objects'] = await pg.evaluate("__bsar.physics.items.length")
+        await pg.screenshot(path=f'{OUT}/3_screen_show.png')
         await b.close()
     print('false knocks (empty room sweep):', false_knocks)
     print('stats:', s)
@@ -46,6 +55,9 @@ async def main():
     if s['vol'] <= 0: fails.append('no snow accumulated')
     if s['knocks'] < 20: fails.append('people did not knock snow off')
     if s['logo'] < 50: fails.append('logo has no snow levels')
+    print('screen:', scr, 'objects:', s.get('objects'))
+    if not scr or abs(scr['w'] - 0.62) > 0.04 or abs(scr['h'] - 0.35) > 0.03 or scr['dz'] > 0.04: fails.append('screen not found or wrong size')
+    if s.get('objects', 0) < 3: fails.append('screen show spawned nothing')
     print('FAIL: ' + ' | '.join(fails) if fails else 'PASS')
     sys.exit(1 if fails else 0)
 

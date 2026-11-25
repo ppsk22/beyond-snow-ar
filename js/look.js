@@ -7,7 +7,9 @@ export const LIGHT_DIR = new THREE.Vector3(-0.35, 1, 0.45).normalize();
 const toonVert = /* glsl */`
   varying vec3 vN;
   varying vec3 vW;
+  varying vec2 vUv;
   void main() {
+    vUv = uv;
     vec4 w = modelMatrix * vec4(position, 1.0);
     vW = w.xyz;
     vN = normalize(mat3(modelMatrix) * normal);
@@ -24,8 +26,12 @@ const toonFrag = /* glsl */`
   uniform float uOutlineW;
   uniform float uRim;
   uniform float uGain;
+  #ifdef USE_MAP
+  uniform sampler2D uMap;
+  #endif
   varying vec3 vN;
   varying vec3 vW;
+  varying vec2 vUv;
   void main() {
     vec3 N = normalize(vN);
     vec3 V = normalize(cameraPosition - vW);
@@ -39,7 +45,12 @@ const toonFrag = /* glsl */`
       float ndl = dot(N, uLight) * 0.5 + 0.5;
       t = clamp(floor(ndl * uSteps) / max(1.0, uSteps - 1.0), 0.0, 1.0);
     }
+    #ifdef USE_MAP
+    vec3 tex = texture2D(uMap, vUv).rgb;
+    vec3 col = mix(tex * uShade, tex * uBase, t);
+    #else
     vec3 col = mix(uShade, uBase, t);
+    #endif
     // Illustrated outline only where the surface turns away from the viewer on its upper side.
     // Compared with a flat surface seen from the same spot, so far-away flat floors stay clean.
     float rel = dot(N, V) - V.y;
@@ -49,7 +60,7 @@ const toonFrag = /* glsl */`
 `;
 
 export function toonMaterial(opts) {
-  return new THREE.ShaderMaterial({
+  const m = new THREE.ShaderMaterial({
     uniforms: {
       uBase: { value: new THREE.Color(opts.base) },
       uShade: { value: new THREE.Color(opts.shade) },
@@ -67,6 +78,12 @@ export function toonMaterial(opts) {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -2,
   });
+  if (opts.map) {
+    // Textured: base and shade act as light multipliers on the texture.
+    m.defines = { USE_MAP: '' };
+    m.uniforms.uMap = { value: opts.map };
+  }
+  return m;
 }
 
 // Inverted hull outline with roughly constant screen width.

@@ -10,6 +10,8 @@
 </head>
 <body>
   <canvas id="snow2d" aria-hidden="true"></canvas>
+  <!-- Neon frame on the desktop page: the phone finds the screen by it. -->
+  <div id="neonFrame" hidden></div>
 
   <!-- Everything inside #overlay stays visible on top of the AR camera view (WebXR DOM overlay). -->
   <div id="overlay">
@@ -18,7 +20,7 @@
 
       <section id="desk" hidden>
         <h1>Let it snow<br>in your room.</h1>
-        <p class="lead">Scan with your phone. The snow follows you off this screen and into the room.</p>
+        <p class="lead">Scan with your phone, start AR and point it back at this screen. The snow comes out of it and into your room.</p>
         <div class="qr-wrap" data-snowcap="7"><div id="qr"></div></div>
         <button id="deskPreview" class="pill ghost" type="button">Or try the 3D preview here</button>
       </section>
@@ -41,6 +43,8 @@
         <div class="pill status" id="status">Starting</div>
       </div>
       <div class="bottom">
+        <button id="skipBtn" class="pill ghost" type="button" hidden>No screen? Skip</button>
+        <button id="pageBtn" class="pill" type="button" hidden>Page</button>
         <button id="placeBtn" class="pill" type="button">Place logo</button>
         <button id="resetBtn" class="pill ghost" type="button">Reset</button>
         <button id="exitBtn" class="pill ghost" type="button">Exit</button>

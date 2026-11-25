@@ -19,7 +19,30 @@ export const P = {
   cell: 0.05,             // snow column size
   upNormal: 0.82,         // normal.y above this counts as horizontal
   levelMerge: 0.07,       // points within this height belong to the same surface level
-  levelConfOn: 0.55,      // confidence needed before a level collects snow
+  // Certification: a level only carries snow when all of these hold (very strict by default)
+  certConf: 0.85,         // confidence (about 15 supporting samples)
+  certAge: 2.0,           // s since first seen
+  certViews: 2,           // distinct phone positions that saw it
+  certViewDist: 0.12,     // m the phone must move to count as a new viewpoint
+  certNoise: 0.025,       // m: max height jitter
+  certNeighbors: 13,      // of 24 cells around it at the same height (flat patch test, kills heads and specks)
+  certDynQuiet: 3.0,      // s with no movement at or just above it
+  uncertConf: 0.35,       // certified levels drop out below this confidence (hysteresis)
+
+  // Surface confirmation (dev): the floor first; tap a neon square to confirm, long press to remove
+  confirmMode: true,
+  onlyConfirmed: false,   // snow only on confirmed surfaces (strict auto-certification off)
+  autoFloor: false,       // confirm the floor by itself once it is very sure
+  autoFloorArea: 3.0,     // m2 of floor needed for that
+  candConf: 0.6,          // confidence a cell needs to be part of a candidate
+  candMinArea: 0.2,       // m2: smallest non-floor candidate (a small table)
+  floorMinArea: 0.6,      // m2: floor candidate
+  floorBelowMin: 0.7,     // m: the floor is at least this far below the phone
+  floorSquare: 1.2,       // m: size of the floor square
+  candStable: 0.8,        // s a candidate must exist before its square shows
+  confirmedConf: 0.3,     // cells of confirmed surfaces need only this confidence
+  showConfirmed: true,    // keep a thin white frame on confirmed surfaces
+  longPress: 0.6,         // s
   levelGain: 0.12,        // confidence gain per supporting sample
   levelLoss: 0.08,        // confidence loss per frame when seen as empty
   levelYLerp: 0.15,       // how fast the level height follows new samples
@@ -37,12 +60,14 @@ export const P = {
 
   // Knock-off
   knockMinH: 0.06,        // intruder must be at least this far above the snow top
-  knockMaxH: 0.45,        // and below this height above the level
-  knockMinPts: 2,         // dynamic samples needed in a column neighborhood
-  knockRadius: 2,         // in cells: neighbors that also lose snow
-  knockUp: 1.4,           // upward kick
-  knockSide: 1.1,         // sideways kick along the intrusion direction
+  knockMaxH: 1.0,         // and below this height above the level
+  knockMinPts: 1,         // dynamic samples needed in a column neighborhood
+  knockRadius: 3,         // in cells: neighbors that also lose snow (dramatic: everything under a foot goes)
+  knockUp: 1.8,           // upward kick
+  knockSide: 1.6,         // sideways kick along the intrusion direction
   knockRandom: 0.6,
+  knockEdge: 1.0,         // how much snow the edge of a knock-off hole loses (0 = soft rim stays)
+  knockPersonAll: true,   // with the ML mask: all snow under a detected person goes, no height band
 
   // Snowfall
   flakes: 1400,
@@ -58,7 +83,10 @@ export const P = {
   flakeOutline: 0.22,     // outline share of the flake radius
 
   // Accumulation
-  ambientRate: 0.0016,    // m of snow per second on every confirmed surface (invisible snowfall)
+  ambientRate: 0.0016,    // m of snow per second on certified surfaces (invisible snowfall)
+  patchSpeed: 0.06,       // how fast patches spread after certification (1 / s)
+  patchScale: 2.4,        // patch noise frequency (1 / m): bigger = smaller, more patches
+  patchSoft: 4,           // how hard patch edges grow in
   flakeDeposit: 0.004,    // m of snow per landed flake (spread over a few cells)
   maxSnow: 0.045,
   smoothEvery: 0.5,       // s between smoothing passes
@@ -93,6 +121,66 @@ export const P = {
   occlusionBias: 0.04,
   occlusionBiasRel: 0.015,
 
+  // People masking
+  mlMask: false,          // ML person cutout (MediaPipe on the camera image, needs camera-access)
+  segModel: 'deeplab',    // deeplab (general, full bodies) | selfie (fast, close people) | multiclass
+  segFps: 12,             // segmentation runs per second (runs in a worker)
+  segWidth: 160,          // width of the image sent to the model (height follows the screen)
+  maskThreshold: 0.55,
+  maskFeather: 0.12,      // soft edge of the cutout
+  maskDilate: 1,          // depth samples next to the mask also count as person (mask lags a bit)
+  maskDepthAgree: true,   // cutout only where depth also sees something near (hides mask lag ghosts)
+  camFlipY: false,        // flip if the cutout or mask shows up upside down on the device
+  debugView: 'off',       // off | mask | depth: overlay to check alignment on the device
+  simMaskLag: 0.08,       // preview: delay of the fake mask, like a real model
+
+  // Screen show: find the desktop screen by its neon frame, then things come out of it
+  screenMode: true,       // start every AR / preview session by looking for the screen
+  findHz: 5,              // detection attempts per second
+  findWidth: 320,         // camera image width used for detection
+  findHueMin: 50,         // neon window (degrees, saturation, value)
+  findHueMax: 115,
+  findSat: 0.45,
+  findVal: 0.45,
+  findMinPx: 0.004,       // smallest frame (share of image pixels)
+  findMinArea: 0.015,     // smallest frame quad (share of the image)
+  findLock: 3,            // consistent detections in a row before it locks
+  findAssumeW: 0.6,       // m: screen width assumed when the screen has no depth
+  burstCount: 14,         // objects in the opening burst
+  burstTime: 2.0,
+  dropEvery: 2.5,         // s between steady drops (0 = off)
+  dropOutShare: 0.25,     // share of steady drops that come out of the screen instead of over the top
+  mixE: 1,                // weights: logo E, O/0 pills, buzzword pills
+  mixO: 1,
+  mixPill: 1.5,
+  objScale: 1,
+  pillHeight: 0.045,      // m
+  objDepth: 0.006,        // m: thickness of the flat 2D cut-outs (new objects only)
+  outSpeed: 1.8,          // m/s out of the screen
+  outLift: 0.9,
+  spin: 6,
+  maxObjects: 40,
+  objGravity: 6.5,
+  objFriction: 0.45,
+  objBounce: 0.25,
+  objPush: 1.2,           // how hard people shove objects
+  objPushRadius: 0.3,
+  shatterOnPush: true,    // pills break into letters when someone walks into them
+  shatterOnTap: true,     // ... or when tapped
+  shatterForce: 1,
+  letterColor: 'neon',    // neon | white | ink
+  letterScale: 1.8,       // letters from a broken pill, relative to the printed text size
+  shatterMinPts: 6,       // moving points that must touch a pill before it breaks
+  assumeFloorBelow: 1.35, // m below the phone, until a floor is found
+  screenSnowShare: 0.5,   // share of the snow that comes out of the screen
+  screenSnowTop: 0.35,    // of that, the share that tips over the top edge
+  screenSnowSpeed: 0.8,
+  panelOn: false,         // 3D page in front of the screen
+  panelScale: 0.9,
+  panelOffset: 0.15,
+  panelOpacity: 0.95,
+  panelScrollSpeed: 1.5,
+
   // Performance guard (work time per frame, not fps: ARCore often runs at 30 fps)
   perfOn: true,
   perfBudgetMs: 14,
@@ -119,14 +207,33 @@ export const SCHEMA = [
   ]],
   ['Accumulation', [
     ['ambientRate', 'Invisible snowfall', 0, 0.01, 0.0001],
+    ['patchSpeed', 'Patch spread speed', 0.005, 0.5, 0.005],
+    ['patchScale', 'Patch size (bigger = smaller)', 0.5, 8, 0.1],
     ['flakeDeposit', 'Snow per flake', 0, 0.02, 0.0005],
     ['maxSnow', 'Max height', 0.005, 0.12, 0.001],
     ['smooth', 'Smoothing', 0, 0.5, 0.01],
   ]],
+  ['Confirm surfaces (dev)', [
+    ['confirmMode', 'Offer squares to confirm'],
+    ['onlyConfirmed', 'Snow only on confirmed'],
+    ['autoFloor', 'Confirm floor by itself'],
+    ['floorMinArea', 'Floor area before square (m2)', 0.1, 4, 0.05],
+    ['candMinArea', 'Other surfaces min area (m2)', 0.05, 2, 0.01],
+    ['candConf', 'Candidate confidence', 0.2, 0.95, 0.01],
+    ['floorBelowMin', 'Floor at least below phone (m)', 0.2, 1.5, 0.05],
+    ['floorSquare', 'Floor square size (m)', 0.3, 3, 0.05],
+    ['showConfirmed', 'Show confirmed frames'],
+    ['longPress', 'Long press (s)', 0.3, 1.5, 0.05],
+  ]],
   ['Surfaces', [
     ['cell', 'Column size (resets)', 0.02, 0.12, 0.005],
     ['upNormal', 'Flatness needed', 0.5, 0.98, 0.01],
-    ['levelConfOn', 'Confidence to snow', 0.1, 1, 0.01],
+    ['certConf', 'Confidence to snow', 0.3, 0.99, 0.01],
+    ['certAge', 'Steady for (s)', 0, 8, 0.1],
+    ['certViews', 'Viewpoints needed', 1, 5, 1],
+    ['certNoise', 'Max jitter (m)', 0.005, 0.08, 0.001],
+    ['certNeighbors', 'Flat patch (of 24)', 0, 24, 1],
+    ['certDynQuiet', 'Quiet before snow (s)', 0, 10, 0.1],
     ['levelLoss', 'Forget speed', 0, 0.5, 0.01],
     ['depthMax', 'Max distance', 1, 8, 0.1],
     ['depthCols', 'Depth samples across', 24, 128, 4],
@@ -137,6 +244,8 @@ export const SCHEMA = [
     ['knockMaxH', 'Max height', 0.1, 1, 0.01],
     ['knockMinPts', 'Points needed', 1, 10, 1],
     ['knockRadius', 'Radius (cells)', 0, 5, 1],
+    ['knockEdge', 'Hole edge strength', 0, 1, 0.05],
+    ['knockPersonAll', 'Person clears everything (ML)'],
     ['knockUp', 'Up kick', 0, 4, 0.05],
     ['knockSide', 'Side kick', 0, 4, 0.05],
     ['dynWindow', 'Dynamic window (s)', 0.2, 4, 0.1],
@@ -156,12 +265,71 @@ export const SCHEMA = [
     ['shadeGain', 'Shade contrast', 0.5, 20, 0.1],
     ['outlineWidth', 'Outline threshold', 0, 1.5, 0.01],
     ['lumps', 'Lumps', 0, 1, 0.01],
-    ['occlusionOn', 'Real objects hide snow'],
-    ['occlusionBias', 'Occlusion bias', 0, 0.2, 0.005],
   ]],
   ['Logo', [
     ['logoWidth', 'Width (m, re-place)', 0.3, 4, 0.05],
     ['logoSnow', 'Snow on logo', 0, 0.1, 0.001],
+  ]],
+  ['Screen show', [
+    ['screenMode', 'Look for the screen at start'],
+    ['burstCount', 'Opening burst', 0, 60, 1],
+    ['burstTime', 'Burst length (s)', 0.2, 8, 0.1],
+    ['dropEvery', 'Drop every (s, 0 = off)', 0, 10, 0.1],
+    ['dropOutShare', 'Drops out of screen', 0, 1, 0.05],
+    ['mixE', 'Weight: E', 0, 5, 0.1],
+    ['mixO', 'Weight: O / 0', 0, 5, 0.1],
+    ['mixPill', 'Weight: word pills', 0, 5, 0.1],
+    ['objScale', 'Object size', 0.3, 3, 0.05],
+    ['objDepth', 'Thickness (m, new objects)', 0.002, 0.05, 0.001],
+    ['outSpeed', 'Out speed', 0, 5, 0.05],
+    ['outLift', 'Out lift', 0, 3, 0.05],
+    ['spin', 'Spin', 0, 20, 0.5],
+    ['maxObjects', 'Max objects', 5, 120, 1],
+    ['screenSnowShare', 'Snow from screen', 0, 1, 0.05],
+    ['screenSnowTop', 'Of that over the top', 0, 1, 0.05],
+    ['screenSnowSpeed', 'Screen snow speed', 0, 3, 0.05],
+  ]],
+  ['Objects', [
+    ['objGravity', 'Gravity', 1, 15, 0.1],
+    ['objFriction', 'Friction', 0, 1, 0.01],
+    ['objBounce', 'Bounce', 0, 0.9, 0.01],
+    ['objPush', 'People shove', 0, 5, 0.05],
+    ['objPushRadius', 'Shove radius', 0.05, 0.8, 0.01],
+    ['shatterOnPush', 'Pills break when walked into'],
+    ['shatterOnTap', 'Pills break when tapped'],
+    ['shatterForce', 'Break force', 0, 4, 0.05],
+    ['letterColor', 'Letter color', ['neon', 'white', 'ink']],
+    ['letterScale', 'Letter size', 0.5, 4, 0.05],
+    ['shatterMinPts', 'Walk-through needed (points)', 1, 40, 1],
+  ]],
+  ['Page panel', [
+    ['panelOn', 'Show page at start'],
+    ['panelScale', 'Size (of screen)', 0.3, 2, 0.05],
+    ['panelOffset', 'Distance from screen', 0, 1, 0.01],
+    ['panelOpacity', 'Opacity', 0.2, 1, 0.01],
+    ['panelScrollSpeed', 'Scroll speed', 0.2, 5, 0.1],
+  ]],
+  ['Screen detection', [
+    ['findHueMin', 'Hue min', 0, 180, 1],
+    ['findHueMax', 'Hue max', 0, 180, 1],
+    ['findSat', 'Saturation min', 0, 1, 0.01],
+    ['findVal', 'Brightness min', 0, 1, 0.01],
+    ['findLock', 'Detections to lock', 1, 10, 1],
+    ['findAssumeW', 'Assumed width (m)', 0.2, 2, 0.01],
+  ]],
+  ['Masking', [
+    ['occlusionOn', 'Depth mask'],
+    ['mlMask', 'ML person cutout'],
+    ['segModel', 'Model', ['deeplab', 'selfie', 'multiclass']],
+    ['debugView', 'Debug overlay', ['off', 'mask', 'depth']],
+    ['camFlipY', 'Flip camera image'],
+    ['segFps', 'Model runs per s', 2, 30, 1],
+    ['segWidth', 'Model input width', 96, 320, 16],
+    ['maskThreshold', 'Mask threshold', 0.1, 0.9, 0.01],
+    ['maskFeather', 'Soft edge', 0, 0.4, 0.01],
+    ['maskDilate', 'Grow mask (samples)', 0, 4, 1],
+    ['maskDepthAgree', 'Cutout needs depth too'],
+    ['occlusionBias', 'Depth mask bias', 0, 0.2, 0.005],
   ]],
   ['Performance', [
     ['perfOn', 'Performance guard'],

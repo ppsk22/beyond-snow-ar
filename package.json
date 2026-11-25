@@ -1,14 +1,20 @@
 {
   "name": "beyond-snow-ar",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "BEYOND THE BUZZ: WebXR snow in your room (Android Chrome) with a 3D preview fallback.",
   "scripts": {
     "serve": "python3 -m http.server 8777",
-    "vendor": "cp node_modules/three/build/three.module.js node_modules/three/build/three.core.js js/vendor/ && cp node_modules/three/examples/jsm/loaders/SVGLoader.js node_modules/three/examples/jsm/utils/BufferGeometryUtils.js js/vendor/addons/ && cp node_modules/qrcode-generator/dist/qrcode.mjs js/vendor/"
+    "vendor": "cp node_modules/three/build/three.module.js node_modules/three/build/three.core.js js/vendor/ && cp node_modules/three/examples/jsm/loaders/SVGLoader.js node_modules/three/examples/jsm/utils/BufferGeometryUtils.js js/vendor/addons/ && cp node_modules/qrcode-generator/dist/qrcode.mjs js/vendor/ && mkdir -p js/vendor/mediapipe/wasm && cp node_modules/@mediapipe/tasks-vision/vision_bundle.mjs js/vendor/mediapipe/ && cp node_modules/@mediapipe/tasks-vision/wasm/vision_wasm_module_internal.* js/vendor/mediapipe/wasm/ && cp node_modules/cannon-es/dist/cannon-es.js js/vendor/"
   },
   "devDependencies": {
+    "@mediapipe/tasks-vision": "1.2.3",
+    "qrcode-generator": "^2.0.4",
     "three": "0.187.0",
-    "qrcode-generator": "^2.0.4"
+    "cannon-es": "0.20.0"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.2.3",
+    "cannon-es": "^0.20.0"
   }
 }

@@ -42,6 +42,8 @@ export class Flakes {
     this.count = 0;
     this.seeded = false;
     this.landed = 0;
+    this._sp = new THREE.Vector3();
+    this._sv = new THREE.Vector3();
   }
 
   respawn(i, P, cam, top) {
@@ -139,6 +141,12 @@ export class Flakes {
       }
       if (gone || y < yBot) {
         this.respawn(i, P, cam, true);
+        // Screen show: part of the snow comes out of the desktop screen instead of from above.
+        if (ctx.screenSource && Math.random() < P.screenSnowShare) {
+          ctx.screenSource(this._sp, this._sv);
+          pos[o] = this._sp.x; pos[o + 1] = this._sp.y; pos[o + 2] = this._sp.z;
+          this.vx[i] = this._sv.x; this.vy[i] = this._sv.y + this.spd[i]; this.vz[i] = this._sv.z;
+        }
         continue;
       }
       if (y > yTop + 0.5) y = yBot + 0.1;

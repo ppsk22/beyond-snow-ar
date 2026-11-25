@@ -9,6 +9,13 @@ import { Flakes, Chunks } from './particles.js';
 import { Logo } from './logo.js';
 import { SimRoom } from './sim.js';
 import { Occlusion } from './occlusion.js';
+import { PersonMask } from './segmenter.js';
+import { ScreenFinder, desktopPageTexture } from './screen.js';
+import { ShapeKit, WORDS } from './shapes.js';
+import { Physics } from './physics.js';
+import { ScreenShow } from './show.js';
+import { PagePanel } from './panel.js';
+import { SurfaceConfirm } from './surfaces.js';
 import { toonMaterial, LIGHT_DIR } from './look.js';
 import { createSnow2D } from './snow2d.js';
 import { createTuner } from './tuner.js';
@@ -23,6 +30,7 @@ const ui = {
   landing: $('landing'), desk: $('desk'), phone: $('phone'), hud: $('hud'), status: $('status'),
   startAR: $('startAR'), startPreview: $('startPreview'), deskPreview: $('deskPreview'), noAR: $('noAR'), arHint: $('arHint'),
   placeBtn: $('placeBtn'), resetBtn: $('resetBtn'), exitBtn: $('exitBtn'), devPill: $('devPill'), panel: $('panel'), overlay: $('overlay'),
+  pageBtn: $('pageBtn'), skipBtn: $('skipBtn'), frame: $('neonFrame'),
 };
 
 // ---------- landing ----------
@@ -35,6 +43,7 @@ function showLanding() {
   ui.hud.hidden = true;
   ui.desk.hidden = isPhone;
   ui.phone.hidden = !isPhone;
+  ui.frame.hidden = isPhone;
   snow2d.start();
   requestAnimationFrame(() => snow2d.rescan());
 }
@@ -101,6 +110,19 @@ logoBlanket.lumpScale = 0.35;
 const flakes = new Flakes(P, scene);
 const chunks = new Chunks(P, scene);
 const occl = new Occlusion(scene);
+const personMask = new PersonMask();
+let certT = 0;
+// Screen show
+const finder = new ScreenFinder();
+const kit = new ShapeKit(P);
+kit.load('assets/glyphs.json').catch((e) => console.warn('glyphs', e));
+const physics = new Physics(P);
+const show = new ScreenShow(P, scene, kit, physics);
+show.words = WORDS;
+const page = new PagePanel(P, scene);
+const surf = new SurfaceConfirm(P, scene, world);
+let staticsT = 0;
+const screenSource = (pos, vel) => show.snowSource(pos, vel);
 
 const reticle = new THREE.Mesh(
   new THREE.RingGeometry(0.09, 0.12, 40).rotateX(-Math.PI / 2),
@@ -137,6 +159,9 @@ function applyLook(key) {
   logo.recolor(P);
   reticle.material.color.set(P.colNeon);
   if (key === 'cell') { world.cell = P.cell; world.clear(); }
+  if (key === 'segModel' && personMask.worker) personMask.stop();
+  kit.recolor(P);
+  if (key === 'panelScale' || key === 'panelOffset' || key === 'panelOpacity') { if (finder.pose) page.attach(finder.pose, WORDS); }
 }
 
 const tuner = createTuner(ui.panel, applyLook);
@@ -167,14 +192,25 @@ function simulate(dt, now, haveDepth) {
     lastCamPos.copy(df.camPos);
     if (jump > 0.25) gateHold = now + 1.0;
     const gate = angVel < P.camGate && linVel < P.camGateMove && now > gateHold;
-    world.support(df, P, now);
+    // Person mask first: person samples count as movement and never as surface.
+    if (P.mlMask) personMask.fill(df, P); else df.person.fill(0);
     occ.update(df, P, now, gate);
+    world.support(df, P, now, occ);
     const removed = [];
     world.freeEvidence(df, P, now, removed);
     for (const l of removed) if (l.vis > 0.002) chunks.drop(l, P, world.cell);
+    certT += dt;
+    if (certT > 0.2) { certT = 0; world.certify(P, now, occ, (l) => chunks.drop(l, P, world.cell)); }
+    surf.update(dt, now, df.camPos.y);
     if (gate && occ.nDyn) {
       world.knock(occ.dynPts, occ.nDyn, P, now, emitReal);
       if (logo.placed) logoWorld.knock(occ.dynPts, occ.nDyn, P, now, emitLogo);
+    }
+    // Person mask points clear everything under and around a person (no height band, one point is enough).
+    if (occ.nPerson && P.knockPersonAll) {
+      const band = { minH: -0.08, maxH: 2.2, minPts: 1 };
+      world.knock(occ.personPts, occ.nPerson, P, now, emitReal, band);
+      if (logo.placed) logoWorld.knock(occ.personPts, occ.nPerson, P, now, emitLogo, band);
     }
     stats.dyn = occ.nDyn;
   }
@@ -191,7 +227,19 @@ function simulate(dt, now, haveDepth) {
     flakes.handoff(handoff.list, df, P, vw, vh);
     handoff = null;
   }
-  const ctx = { P, worlds, occ, df: haveDepth || df.ok ? df : null, cam: df.ok ? df.camPos : camera.position, now, quality };
+  if (show.active) {
+    show.update(dt, now);
+    staticsT += dt;
+    if (staticsT > 1.5) {
+      staticsT = 0;
+      physics.rebuildStatics(world, P);
+      if (surf.floor) physics.setFloor(surf.floor.y);
+      if (physics.floorY === null) physics.setFloor((df.ok ? df.camPos.y : camera.position.y) - P.assumeFloorBelow);
+    }
+    physics.push(occ, P, (it) => { if (it.kind === 'pill' && P.shatterOnPush) show.shatter(it); });
+    physics.step(dt, P);
+  }
+  const ctx = { P, worlds, occ, df: haveDepth || df.ok ? df : null, cam: df.ok ? df.camPos : camera.position, now, quality, screenSource: show.active ? screenSource : null };
   flakes.update(dt, ctx);
   chunks.update(dt, ctx);
   const budget = 4000 * quality;
@@ -211,18 +259,21 @@ function simulate(dt, now, haveDepth) {
 
 function updateStatus() {
   let live = 0;
-  for (const l of world.levels) if (l.conf >= P.levelConfOn) live++;
+  for (const l of world.levels) if (l.cert) live++;
   stats.levels = world.levels.length;
   stats.live = live;
   const area = live * world.cell * world.cell;
   let msg;
   if (mode === 'ar' && !df.ok) msg = 'Looking for depth. Move the phone slowly';
+  else if (finder.state === 'search') msg = 'Point your phone at the screen with the neon frame';
+  else if (P.confirmMode && !surf.floor && surf.floorCand && surf.floorCand.mesh && surf.floorCand.mesh.visible) msg = 'Tap the neon square to confirm the floor';
+  else if (P.confirmMode && !surf.floor && !show.active) msg = 'Look at the floor and move the phone a little';
   else if (area < 0.3) msg = 'Move your phone slowly to find surfaces';
   else if (placing) msg = 'Tap to place the logo on the ring';
   else msg = `Snow on ${area.toFixed(1)} m². Walk through it!`;
   if (ui.status.textContent !== msg) ui.status.textContent = msg;
   if (!ui.devPill.hidden) {
-    ui.devPill.textContent = `work ${stats.work.toFixed(1)} ms  q${qStep}\nlevels ${stats.levels} live ${live}\nvox ${occ.list.length} dyn ${stats.dyn}\nflakes ${flakes.count} chunks ${chunks.count}\nknocks ${stats.knocks}  turn ${angVel.toFixed(2)}\ndepth ${df.cols}x${df.rows} ${mode === 'ar' ? depthInfo() : 'sim'}`;
+    ui.devPill.textContent = `work ${stats.work.toFixed(1)} ms  q${qStep}\nlevels ${stats.levels} live ${live}\nvox ${occ.list.length} dyn ${stats.dyn}\nflakes ${flakes.count} chunks ${chunks.count}\nknocks ${stats.knocks}  turn ${angVel.toFixed(2)}\ndepth ${df.cols}x${df.rows} ${mode === 'ar' ? depthInfo() : 'sim'}\nscreen ${finder.state} ${finder.info}  objs ${physics.items.length}\nmask ${P.mlMask ? personMask.state + ' ' + personMask.info + (personMask.inferMs ? ' ' + personMask.inferMs.toFixed(0) + 'ms' : '') : 'off'}  pd ${occl.personDepth.toFixed(2)}`;
   }
 }
 
@@ -239,8 +290,9 @@ async function requestARSession() {
     try {
       return await navigator.xr.requestSession('immersive-ar', {
         requiredFeatures: ['depth-sensing'],
-        optionalFeatures: ['hit-test', 'dom-overlay'],
-        depthSensing: { usagePreference: ['cpu-optimized'], dataFormatPreference: f },
+        optionalFeatures: ['hit-test', 'dom-overlay', 'camera-access'],
+        // depthTypeRequest / matchDepthView are newer spec members; browsers that do not know them ignore them.
+        depthSensing: { usagePreference: ['cpu-optimized'], dataFormatPreference: f, depthTypeRequest: ['smooth'], matchDepthView: true },
         domOverlay: overlay,
       });
     } catch (e) { lastErr = e; if (e.name !== 'TypeError') break; }
@@ -269,7 +321,8 @@ async function startAR() {
   ui.hud.hidden = false;
   renderer.domElement.style.display = '';
   scene.background = null;
-  if (sim) sim.group.visible = false;
+  renderer.setClearColor(0x000000, 0);
+  if (sim) sim.setVisible(false);
   renderer.xr.setReferenceSpaceType('local');
   await renderer.xr.setSession(session);
   try {
@@ -277,8 +330,11 @@ async function startAR() {
     hitSource = await session.requestHitTestSource({ space: viewer });
   } catch (e) { hitSource = null; }
   session.addEventListener('select', onSelect);
+  session.addEventListener('selectstart', () => { selT0 = performance.now(); });
+  startScreenSearch();
   session.addEventListener('end', () => {
     xrSession = null; hitSource = null; mode = 'landing';
+    show.stop(); finder.stop(); page.show(false);
     renderer.setAnimationLoop(null);
     renderer.domElement.style.display = 'none';
     showLanding();
@@ -324,8 +380,22 @@ function onXRFrame(t, frame) {
       } else { reticle.visible = false; lastHit = null; }
     }
   }
+  let camTex = null;
+  if (pose) {
+    const view = pose.views[0];
+    if (view.camera && renderer.xr.getCameraTexture) camTex = renderer.xr.getCameraTexture(view.camera) || null;
+    if (P.mlMask) {
+      if (personMask.state === 'off') personMask.start(P.segModel);
+      if (camTex) personMask.grab(renderer, camTex, P, now, vp.w / Math.max(1, vp.z));
+    }
+  }
   simulate(dt, now, haveDepth);
-  if (haveDepth) occl.update(df, P, vp); else occl.mesh.visible = false;
+  if (finder.state === 'search') {
+    const pose = finder.update(renderer, camTex, df, P, now, vp.w / Math.max(1, vp.z));
+    if (pose) onScreenLocked(pose, now);
+  }
+  kit.setViewH(vp.w || renderer.domElement.height);
+  if (haveDepth) occl.update(df, P, vp, personMask, camTex); else occl.hide();
   updateStatus();
   renderer.render(scene, camera);
 }
@@ -384,13 +454,77 @@ function readDepth(di, df, cols, rows) {
   }
 }
 
-function onSelect() {
-  if (!placing || !lastHit || !logo.ready) return;
-  logo.place(lastHit, df.camPos, logoWorld);
-  placing = false;
-  ui.placeBtn.classList.remove('on');
-  reticle.visible = false;
+let selT0 = 0;
+function onSelect(ev) {
+  if (touch.moved) return;  // a swipe (page scroll), not a tap
+  const long = (performance.now() - selT0) / 1000 > P.longPress;
+  const ref = renderer.xr.getReferenceSpace();
+  let ray = null;
+  try {
+    const pose = ev.frame.getPose(ev.inputSource.targetRaySpace, ref);
+    if (pose) {
+      const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
+      const o = new THREE.Vector3().setFromMatrixPosition(m);
+      const d = new THREE.Vector3(0, 0, -1).transformDirection(m);
+      ray = new THREE.Raycaster(o, d);
+    }
+  } catch (e) { ray = null; }
+  if (long) handleLongPress(ray); else handleTap(ray, df.camPos);
 }
+
+// Long press: remove a confirmed surface.
+function handleLongPress(ray) {
+  if (!ray) return;
+  const k = surf.pickConfirmed(ray);
+  if (k) surf.remove(k);
+}
+
+// Shared tap logic (AR select or preview click): page pills, show objects, logo placement.
+function handleTap(ray, camPos) {
+  if (ray && P.confirmMode) {
+    const c = surf.pickCandidate(ray);
+    if (c) { surf.confirm(c, performance.now() / 1000); return; }
+  }
+  if (ray) {
+    const ph = page.hit(ray);
+    if (ph) {
+      if (ph.word && show.active) {
+        const dir = ray.ray.direction.clone().negate();
+        show.spawn('pill', 'out', { pos: ph.point.clone().addScaledVector(dir, 0.04), vel: dir.multiplyScalar(1.4).add(new THREE.Vector3(0, 1.2, 0)) }, ph.word);
+      }
+      return;
+    }
+    if (show.active && show.tap(physics.raycast(ray), ray.ray.direction)) return;
+  }
+  if (placing && lastHit && logo.ready) {
+    logo.place(lastHit, camPos, logoWorld);
+    placing = false;
+    ui.placeBtn.classList.remove('on');
+    reticle.visible = false;
+  }
+}
+
+function onScreenLocked(pose, now) {
+  console.info('[screen] locked', pose);
+  show.start(pose, now);
+  page.attach(pose, WORDS);
+  page.show(P.panelOn);
+  ui.pageBtn.classList.toggle('on', P.panelOn);
+  ui.skipBtn.hidden = true;
+  ui.pageBtn.hidden = false;
+}
+
+// Swipes on the overlay scroll the page panel.
+const touch = { y: 0, moved: false, active: false };
+ui.overlay.addEventListener('touchstart', (e) => { touch.active = true; touch.moved = false; touch.y = e.touches[0].clientY; }, { passive: true });
+ui.overlay.addEventListener('touchmove', (e) => {
+  if (!touch.active) return;
+  const y = e.touches[0].clientY, dy = touch.y - y;
+  if (Math.abs(dy) > 8) touch.moved = true;
+  if (touch.moved && page.visible) page.scrollBy(dy * P.panelScrollSpeed);
+  touch.y = y;
+}, { passive: true });
+ui.overlay.addEventListener('touchend', () => { touch.active = false; setTimeout(() => { touch.moved = false; }, 50); }, { passive: true });
 
 // ---------- preview (simulation) ----------
 const look = { yaw: 0, pitch: -0.32, keys: new Set(), drag: null };
@@ -398,7 +532,7 @@ const look = { yaw: 0, pitch: -0.32, keys: new Set(), drag: null };
 function startSim() {
   const list = snow2d.getFlakes();
   if (!sim) sim = new SimRoom(scene, P);
-  sim.group.visible = true;
+  sim.setVisible(true);
   mode = 'sim';
   handoff = { list, w: window.innerWidth, h: window.innerHeight };
   resetWorld();
@@ -406,11 +540,12 @@ function startSim() {
   ui.landing.hidden = true;
   ui.hud.hidden = false;
   renderer.domElement.style.display = '';
-  scene.background = new THREE.Color('#1a1a1a');
+  scene.background = null;
   camera.position.set(0.6, 1.45, 3.0);
   look.yaw = 0; look.pitch = -0.32;
-  occl.mesh.visible = false;
+  occl.hide();
   lastT = 0;
+  startScreenSearch();
   renderer.setAnimationLoop(onSimFrame);
 }
 
@@ -428,11 +563,20 @@ function onSimFrame(t) {
   camera.position.x = Math.max(-3.2, Math.min(3.2, camera.position.x));
   camera.position.z = Math.max(-3.2, Math.min(3.2, camera.position.z));
   camera.rotation.set(look.pitch, look.yaw, 0, 'YXZ');
+  // Handheld sway: a phone is never perfectly still (also gives surfaces their second viewpoint).
+  const swayX = Math.sin(now * 0.7) * 0.09, swayY = Math.sin(now * 1.1 + 1) * 0.03;
+  camera.position.x += swayX - (look.swayX || 0);
+  camera.position.y += swayY - (look.swayY || 0);
+  look.swayX = swayX; look.swayY = swayY;
   camera.updateMatrixWorld(true);
   sim.update(dt);
   const cols = P.depthCols | 0;
   const rows = Math.max(8, Math.round(cols * (window.innerHeight / window.innerWidth)));
+  // Same passes as AR: camera feed as background, depth, person mask, then occlusion from depth only.
+  const feedTex = sim.renderFeed(renderer, scene, camera);
   sim.captureDepth(renderer, scene, camera, df, cols, rows);
+  if (P.mlMask) sim.captureMask(renderer, scene, camera, P, personMask, now);
+  else if (personMask.state === 'sim') { personMask.state = 'off'; personMask.mask = null; }
   const h = renderer.domElement.height;
   for (const m of [flakes.mat, chunks.mat]) m.uniforms.uViewH.value = h;
   logo.setViewH(h);
@@ -443,13 +587,21 @@ function onSimFrame(t) {
   if (p) { reticle.matrix.makeTranslation(p.x, p.y + 0.003, p.z); lastHit = p.clone(); }
   reticle.visible = placing && !!p;
   simulate(dt, now, true);
+  if (finder.state === 'search') {
+    const pose = finder.update(renderer, feedTex, df, P, now, window.innerHeight / window.innerWidth);
+    if (pose) onScreenLocked(pose, now);
+  }
+  kit.setViewH(renderer.domElement.height);
+  const db = renderer.getDrawingBufferSize(new THREE.Vector2());
+  vp.set(0, 0, db.x, db.y);
+  occl.update(df, P, vp, personMask, feedTex);
   updateStatus();
   renderer.render(scene, camera);
 }
 
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (mode !== 'sim') return;
-  look.drag = { x: e.clientX, y: e.clientY, yaw: look.yaw, pitch: look.pitch, moved: 0 };
+  look.drag = { x: e.clientX, y: e.clientY, yaw: look.yaw, pitch: look.pitch, moved: 0, t: performance.now() };
   renderer.domElement.setPointerCapture(e.pointerId);
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
@@ -459,14 +611,16 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   look.yaw = look.drag.yaw + dx * 0.005;
   look.pitch = Math.max(-1.3, Math.min(0.9, look.drag.pitch + dy * 0.005));
 });
-renderer.domElement.addEventListener('pointerup', () => {
-  if (look.drag && look.drag.moved < 6 && placing && lastHit && logo.ready) {
-    logo.place(lastHit, camera.position, logoWorld);
-    placing = false;
-    ui.placeBtn.classList.remove('on');
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (look.drag && look.drag.moved < 6) {
+    const r = new THREE.Raycaster();
+    const rect = renderer.domElement.getBoundingClientRect();
+    r.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+    if ((performance.now() - look.drag.t) / 1000 > P.longPress) handleLongPress(r); else handleTap(r, camera.position);
   }
   look.drag = null;
 });
+renderer.domElement.addEventListener('wheel', (e) => { if (page.visible) page.scrollBy(e.deltaY); }, { passive: true });
 addEventListener('keydown', (e) => look.keys.add(e.key.toLowerCase()));
 addEventListener('keyup', (e) => look.keys.delete(e.key.toLowerCase()));
 addEventListener('resize', () => {
@@ -478,9 +632,17 @@ addEventListener('resize', () => {
 
 // ---------- buttons ----------
 function noXRSelect(el) { el.addEventListener('beforexrselect', (e) => e.preventDefault()); }
-[ui.placeBtn, ui.resetBtn, ui.exitBtn, ui.status].forEach(noXRSelect);
+[ui.placeBtn, ui.resetBtn, ui.exitBtn, ui.status, ui.pageBtn, ui.skipBtn].forEach(noXRSelect);
+
+function startScreenSearch() {
+  show.stop();
+  page.show(false);
+  ui.pageBtn.hidden = true;
+  if (P.screenMode) { finder.start(); ui.skipBtn.hidden = false; } else { finder.stop(); ui.skipBtn.hidden = true; }
+}
 
 function resetWorld() {
+  surf.clear();
   world.cell = P.cell;
   world.clear();
   logoWorld.clear();
@@ -499,24 +661,27 @@ ui.placeBtn.addEventListener('click', () => {
   placing = !placing;
   ui.placeBtn.classList.toggle('on', placing);
 });
-ui.resetBtn.addEventListener('click', resetWorld);
+ui.resetBtn.addEventListener('click', () => { resetWorld(); if (mode !== 'landing') startScreenSearch(); });
+ui.skipBtn.addEventListener('click', () => { finder.stop(); ui.skipBtn.hidden = true; });
+ui.pageBtn.addEventListener('click', () => { page.show(!page.visible); ui.pageBtn.classList.toggle('on', page.visible); });
 ui.exitBtn.addEventListener('click', () => {
   if (xrSession) { xrSession.end(); return; }
   renderer.setAnimationLoop(null);
   renderer.domElement.style.display = 'none';
-  if (sim) sim.group.visible = false;
+  if (sim) sim.setVisible(false);
+  show.stop(); finder.stop(); page.show(false);
   mode = 'landing';
   showLanding();
 });
 
 // Test hooks (used by the headless tests, harmless otherwise).
 window.__bsar = {
-  P, world, logoWorld, occ, df, flakes, chunks, logo, camera, look, stats,
+  P, world, logoWorld, occ, df, flakes, chunks, logo, camera, look, stats, personMask, occl,
   get sim() { return sim; },
   get mode() { return mode; },
-  startSim, resetWorld,
+  startSim, resetWorld, finder, show, physics, page, kit, handleTap, handleLongPress, surf, THREE_Raycaster: THREE.Raycaster,
   placeLogoAt(x, y, z) { logo.place(new THREE.Vector3(x, y, z), camera.position, logoWorld); },
-  liveArea() { let n = 0; for (const l of world.levels) if (l.conf >= P.levelConfOn) n++; return n * world.cell * world.cell; },
+  liveArea() { let n = 0; for (const l of world.levels) if (l.cert) n++; return n * world.cell * world.cell; },
   snowVolume() { let v = 0; for (const l of world.levels) v += l.vis; return v * world.cell * world.cell; },
 };
 void LIGHT_DIR; void emitCap; void tuner;
