@@ -80,35 +80,74 @@ export class PagePanel {
     this.pose = pose;
     if (!this.tex) this.draw(words);
     const P = this.P;
-    const w = pose.w * P.panelScale, h = pose.h * P.panelScale;
+    this.wm = pose.w * P.panelScale;          // panel width in m
+    this.hm = pose.h * P.panelScale;          // the window on the monitor, in m
     if (!this.mesh) {
-      this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, opacity: P.panelOpacity, depthWrite: false }));
+      // The panel is a tall plane: its bottom part sits on the monitor; whatever was scrolled past
+      // continues above the monitor's top edge (fading out) instead of disappearing.
+      this.mat = new THREE.ShaderMaterial({
+        uniforms: {
+          uMap: { value: this.tex }, uOffset: { value: 0 }, uRepeat: { value: 1 },
+          uOpacity: { value: P.panelOpacity }, uWin: { value: 1 }, uFade: { value: 0.3 },
+        },
+        vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: /* glsl */`
+          uniform sampler2D uMap;
+          uniform float uOffset, uRepeat, uOpacity, uWin, uFade;
+          varying vec2 vUv;
+          void main() {
+            vec3 c = texture2D(uMap, vec2(vUv.x, uOffset + vUv.y * uRepeat)).rgb;
+            // uWin: share of the plane height that is the monitor window (from the bottom).
+            float above = max(0.0, vUv.y - uWin) / max(1e-4, 1.0 - uWin);
+            float a = uOpacity * (vUv.y > uWin ? 1.0 - smoothstep(1.0 - uFade, 1.0, above) * 0.85 : 1.0);
+            gl_FragColor = vec4(c, a);
+          }`,
+        transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      });
+      this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.mat);
       this.mesh.renderOrder = 5;
       this.scene.add(this.mesh);
     }
-    this.mesh.scale.set(w, h, 1);
+    this.mat.uniforms.uMap.value = this.tex;
     const m = new THREE.Matrix4().makeBasis(pose.right, pose.up, pose.normal);
     this.mesh.quaternion.setFromRotationMatrix(m);
-    this.mesh.position.copy(pose.center).addScaledVector(pose.normal, P.panelOffset);
-    this.view = this.canvas.width * (h / w);   // visible canvas height in px
+    this.view = this.canvas.width * (this.hm / this.wm);   // visible canvas height in px on the monitor
     this.setScroll(this.scroll);
     this.mesh.visible = this.visible;
   }
 
   setScroll(s) {
-    if (!this.tex) return;
+    if (!this.tex || !this.pose) return;
+    const P = this.P, pose = this.pose;
     const H = this.canvas.height, vh = Math.min(H, this.view || H);
     this.scroll = Math.max(0, Math.min(H - vh, s));
-    const r = vh / H;
-    this.tex.repeat.set(1, r);
-    this.tex.offset.set(0, 1 - r - this.scroll / H);
+    // How much of the scrolled-past page shows above the monitor (in canvas px, capped).
+    const pxPerM = this.canvas.width / this.wm;
+    const ext = P.panelExtend ? Math.min(this.scroll, P.panelExtendMax * pxPerM) : 0;
+    const shown = vh + ext;
+    // Texture window: from (scroll - ext) down to (scroll + vh), v = 1 is the canvas top.
+    const r = shown / H;
+    const o = 1 - (this.scroll - ext + shown) / H;
+    this.tex.repeat.set(1, r);       // kept for hit testing
+    this.tex.offset.set(0, o);
+    const u = this.mat.uniforms;
+    u.uOffset.value = o; u.uRepeat.value = r;
+    u.uWin.value = vh / shown;
+    u.uFade.value = P.panelExtendFade;
+    u.uOpacity.value = P.panelOpacity;
+    // Plane: bottom on the monitor window's bottom, taller by the extension.
+    const hTot = this.hm * shown / vh;
+    this.mesh.scale.set(this.wm, hTot, 1);
+    this.mesh.position.copy(pose.center)
+      .addScaledVector(pose.normal, P.panelOffset)
+      .addScaledVector(pose.up, -this.hm / 2 + hTot / 2);
   }
 
   scrollBy(px) { this.setScroll(this.scroll + px); }
 
   show(v) {
     this.visible = v;
-    if (this.mesh) { this.mesh.visible = v; this.mesh.material.opacity = this.P.panelOpacity; }
+    if (this.mesh) { this.mesh.visible = v; this.mat.uniforms.uOpacity.value = this.P.panelOpacity; }
   }
 
   // Ray hit: returns { word, point } for a pill under the ray, or { point } for the panel, or null.

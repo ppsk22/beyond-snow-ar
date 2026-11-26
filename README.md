@@ -5,7 +5,7 @@ Snow settles on real floors, tables and shelves (found through ARCore depth), an
 things moving through it knock it loose. A placed 3D logo has snow caps that get knocked off too.
 Cel-shaded in CI colors. iPhones and desktops get a 3D preview room with simulated people.
 
-Version 0.3.2.
+Version 0.4.2.
 
 ## Map
 
@@ -37,7 +37,8 @@ Version 0.3.2.
 | `js/snow2d.js` | 2D snow on the start screen (site style); its flakes hand over into the 3D room |
 | `js/tuner.js` | Dev panel with the config field (copy, paste, apply) |
 | `js/screen.js` | Finds the desktop screen: neon frame in the camera image, plane from depth, locked pose |
-| `js/show.js` | The screen show: burst out of the screen, drops over the top edge, pills breaking into letters |
+| `js/fallers.js` | Falling shapes like the header snow: E, O / 0 and word pills drift down everywhere, land, tumble flat and fade |
+| `js/show.js` | (Off by default since v0.4) objects bursting out of the screen, pills breaking into letters |
 | `js/physics.js` | Rigid bodies (cannon-es); colliders from certified surfaces; people shove objects |
 | `js/panel.js` | The scrollable 3D page in front of the screen |
 | `js/surfaces.js` | Dev: floor-first surface confirmation (neon squares, tap to confirm, long press to remove) |
@@ -61,6 +62,13 @@ Optional: `assets/models/` for local copies of the segmentation models (otherwis
 4. **Organic patches:** after certification a "wetness" value rises; each spot has a noise threshold and snow starts sticking where wetness passes it, so patches appear, grow and merge. Flakes that land add snow directly. The blanket is cut along smooth contours (marching squares), with a little falloff past the edge.
 5. **Movement detection:** 10 cm voxels remember when they were seen empty. A voxel that was clearly empty and is now hit in consecutive frames is dynamic; person-mask samples are always dynamic. Dynamic points 6 to 45 cm above snow knock it off, with a soft-edged hole, flying in the direction of the movement.
 6. **Masking:** the depth mask writes real depth into the z-buffer first. The optional ML cutout runs MediaPipe person segmentation on the camera image (12 per second, in a worker) and paints the real camera pixels of people back over the snow with a soft edge, at the person's depth.
+
+## v0.4 focus
+
+- Once the screen is found, the **page is shown on it right away** (Page button toggles it). Nothing comes out of the screen ("Snow from screen" is 0 by default).
+- **No more objects bursting out of the screen** (`showObjects` off): they flew into the viewer and their outlines turned the screen black up close.
+- **Falling shapes everywhere, like the header snow:** logo E, O / 0 and small word pills drift down around you (mostly in front), flutter, land on surfaces, tumble flat, lie still for a moment and fade. No screen needed. Section "Falling shapes" in Options.
+- **Softer snow:** one shade band with a soft edge, and a much lighter, rarer outline ("Band softness", "Outline darkness", "Outline threshold").
 
 ## The screen show (v0.3)
 
@@ -95,6 +103,10 @@ Optional: `assets/models/` for local copies of the segmentation models (otherwis
 
 ## Expected bugs and caveats
 
+- **Scrolling the page (v0.4.2):** in AR a transparent touch layer under the buttons takes all touches: a vertical drag scrolls the page, a tap or long press becomes a ray as before. The part of the page you scrolled past continues above the monitor (up to 0.8 m, fading toward the top). Tapping a buzzword on the page drops that pill into the room (it falls, tumbles, fades).
+- **Touch layer caveat:** because it takes every touch, Chrome's own XR tap events are no longer used in AR; if taps on squares or pills stop working on your phone, tell me.
+- **Falling shapes land on:** snowy surfaces, real surfaces seen in the camera, else the confirmed floor, else the lowest big snowy region, else a guess 1.35 m below the phone. Before any floor is known they can land in mid air or sink into the floor if you hold the phone unusually high or low.
+- **Falling shapes are small and spread out** (14, mostly in front): raise "How many" or "Size" if you barely see them.
 - **v0.3.2 look:** "plates" (default) draws every connected snowy region on its best-fit plane (gentle slopes like a duvet stay one smooth sheet) and gives regions under 0.09 m2 no snow. Neighbors at clearly different heights are kept apart, so no walls or spikes get stretched between them.
 - **v0.3.1 had a spike bug:** regions crept up slopes cell by cell and were then drawn at a height far from parts of them, which made tall spikes; their steep sides were drawn in the black outline colour. Right in front of the lens such a spike can fill the screen black. Fixed in v0.3.2.
 - **Kick-up toned down:** half of the knocked snow is now pushed into a low ring around the hole, at most 2 chunks per cell fly, lower and shorter.

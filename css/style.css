@@ -48,6 +48,9 @@ h1 { font-size: clamp(34px, 9vw, 64px); line-height: 1.02; margin: 0; font-weigh
 #qr svg { display: block; width: min(280px, 60vw); height: auto; }
 
 #hud { position: absolute; inset: 0; pointer-events: none; }
+#touchLayer { position: absolute; inset: 0; pointer-events: none; touch-action: none; }
+#touchLayer.on { pointer-events: auto; }
+#hud .top, #hud .bottom, #hud .dev { z-index: 1; }
 #hud .top { position: absolute; top: max(14px, env(safe-area-inset-top)); left: 0; right: 0; display: flex; justify-content: center; }
 #hud .bottom {
   position: absolute; bottom: max(18px, env(safe-area-inset-bottom)); left: 0; right: 0;

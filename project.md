@@ -1,6 +1,6 @@
 ---
 project: BEYOND THE BUZZ AR snow
-status: prototype v0.3.2
+status: prototype v0.4.2
 deadline: 2026-12-07
 tags: [beyond-global, christmas-2026, webxr, ar]
 ---
@@ -40,6 +40,10 @@ tags: [beyond-global, christmas-2026, webxr, ar]
 
 - 2026-11-25: phone test of v0.3.1: screen detection works, but black screen and black spikes in the snow (plate regions crept up slopes, drawn far from their real height, steep sides in outline black). v0.3.2: regions grow only across small height steps and sit on a best-fit plane, neighbors at different heights kept apart, Options button in the HUD, transparent AR clear every frame
 
+- 2026-11-26: phone test of v0.3.2: falling snow perfect, piled snow better but too cel shaded and the outline makes it blocky; near fullscreen black glitches once the screen is found (objects flying out of the screen into the viewer); the page on the screen works perfectly. v0.4.0: focus on snow plus the page on the screen; screen objects off; shapes fall like the header snow everywhere, land, tumble and fade; one soft shade band, lighter outline
+
+- 2026-11-26: v0.4.1 nothing comes out of the screen. v0.4.2: page scrollable by dragging in AR (touch layer), scrolled-past part continues above the monitor and fades, tapped buzzwords drop as falling pills
+
 ## To-dos
 - [ ] Decide hosting: GitHub Pages (ppsk22) or a WordPress subfolder with HTTPS
 - [x] First device run (USB)
@@ -50,7 +54,8 @@ tags: [beyond-global, christmas-2026, webxr, ar]
 - [ ] Screen show on the real monitor: does it lock (dev pill `screen ...`)? Size right? If not, try the 2-tap fallback
 - [ ] Compare snow Look plates vs detail; turn on ML person cutout and walk through
 - [ ] Tune the mix, sizes and speeds in the panel, send the config JSON
-- [ ] Decide: keep the 3D page or drop it
+- [x] Decide: keep the 3D page (yes, it is the focus)
+- [ ] Tune falling shapes (count, size, speed) and the softer snow look, send the config
 - [ ] Test floor confirmation: how fast does the square appear, does the tap hit it, does long press remove it
 - [ ] Decide: confirmation as the normal flow for visitors, or dev only (auto floor instead?)
 - [ ] Decide: should the neon frame be on the live campaign page too (needed for the screen show from the real site)

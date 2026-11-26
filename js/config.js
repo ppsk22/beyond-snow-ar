@@ -121,9 +121,11 @@ export const P = {
   logoSample: 0.016,      // snow column size on the logo
 
   // Look
-  toonSteps: 3,
-  shadeGain: 7,           // how quickly snow bumps facing away from the light fall into the shade band
-  outlineWidth: 0.6,      // how steep a snow edge must turn away before it gets the outline (bigger = fewer lines)
+  toonSteps: 2,            // one shade band
+  shadeSoft: 0.4,         // softness of the band edge (0 = hard cel step)
+  outlineMix: 0.45,       // how dark the top outline is (0 = none, 1 = full outline colour)
+  shadeGain: 5,           // how quickly snow bumps facing away from the light fall into the shade band
+  outlineWidth: 1.0,      // how steep a snow edge must turn away before it gets the outline (bigger = fewer, thinner lines)
   lumps: 0.3,            // height variation of the snow blanket (0 = perfectly flat)
   occlusionOn: true,
   occlusionBias: 0.04,
@@ -144,6 +146,18 @@ export const P = {
 
   // Screen show: find the desktop screen by its neon frame, then things come out of it
   screenMode: true,       // start every AR / preview session by looking for the screen
+  showObjects: false,     // objects bursting out of the screen (off: caused black flashes up close)
+
+  // Falling shapes, like the header snow (everywhere, no screen needed)
+  fallersOn: true,
+  shapeCount: 14,
+  shapeFront: 0.75,       // share spawned in front of the viewer
+  shapeScale: 1.0,        // relative to the old show objects (E about 11 cm wide)
+  shapeFall: 0.3,         // m/s
+  shapeSpin: 1.2,         // rad/s flutter
+  shapeTumble: 0.5,       // s to settle flat after landing
+  shapeRest: 1.5,         // s lying before fading
+  shapeFade: 1.0,         // s
   findHz: 5,              // detection attempts per second
   findWidth: 320,         // camera image width used for detection
   findHueMin: 42,         // neon window (degrees, saturation, value); tolerant: cameras wash neon out
@@ -181,14 +195,17 @@ export const P = {
   letterScale: 1.8,       // letters from a broken pill, relative to the printed text size
   shatterMinPts: 6,       // moving points that must touch a pill before it breaks
   assumeFloorBelow: 1.35, // m below the phone, until a floor is found
-  screenSnowShare: 0.5,   // share of the snow that comes out of the screen
+  screenSnowShare: 0,     // share of the snow that comes out of the screen (off: nothing comes out of it)
   screenSnowTop: 0.35,    // of that, the share that tips over the top edge
   screenSnowSpeed: 0.8,
-  panelOn: false,         // 3D page in front of the screen
+  panelOn: true,          // 3D page in front of the screen (shown as soon as the screen is found)
   panelScale: 0.9,
   panelOffset: 0.15,
   panelOpacity: 0.95,
   panelScrollSpeed: 1.5,
+  panelExtend: true,      // scrolled-past page continues above the monitor
+  panelExtendMax: 0.8,    // m: how far it may reach above the monitor
+  panelExtendFade: 0.5,   // share of the part above that fades out toward the top
 
   // Performance guard (work time per frame, not fps: ARCore often runs at 30 fps)
   perfOn: true,
@@ -277,6 +294,8 @@ export const SCHEMA = [
     ['colNeon', 'Neon'],
     ['colSnowShade', 'Snow shade'],
     ['toonSteps', 'Toon steps', 2, 5, 1],
+    ['shadeSoft', 'Band softness', 0, 1, 0.01],
+    ['outlineMix', 'Outline darkness', 0, 1, 0.01],
     ['shadeGain', 'Shade contrast', 0.5, 20, 0.1],
     ['outlineWidth', 'Outline threshold', 0, 1.5, 0.01],
     ['lumps', 'Lumps', 0, 1, 0.01],
@@ -285,15 +304,27 @@ export const SCHEMA = [
     ['logoWidth', 'Width (m, re-place)', 0.3, 4, 0.05],
     ['logoSnow', 'Snow on logo', 0, 0.1, 0.001],
   ]],
+  ['Falling shapes', [
+    ['fallersOn', 'On'],
+    ['shapeCount', 'How many', 0, 40, 1],
+    ['shapeFront', 'In front of you', 0, 1, 0.05],
+    ['shapeScale', 'Size', 0.2, 2, 0.05],
+    ['shapeFall', 'Fall speed', 0.05, 1.5, 0.01],
+    ['shapeSpin', 'Flutter', 0, 5, 0.05],
+    ['shapeTumble', 'Tumble time (s)', 0.1, 2, 0.05],
+    ['shapeRest', 'Lie still (s)', 0, 8, 0.1],
+    ['shapeFade', 'Fade (s)', 0.1, 4, 0.1],
+    ['mixE', 'Weight: E', 0, 5, 0.1],
+    ['mixO', 'Weight: O / 0', 0, 5, 0.1],
+    ['mixPill', 'Weight: word pills', 0, 5, 0.1],
+  ]],
   ['Screen show', [
     ['screenMode', 'Look for the screen at start'],
+    ['showObjects', 'Objects burst out of screen'],
     ['burstCount', 'Opening burst', 0, 60, 1],
     ['burstTime', 'Burst length (s)', 0.2, 8, 0.1],
     ['dropEvery', 'Drop every (s, 0 = off)', 0, 10, 0.1],
     ['dropOutShare', 'Drops out of screen', 0, 1, 0.05],
-    ['mixE', 'Weight: E', 0, 5, 0.1],
-    ['mixO', 'Weight: O / 0', 0, 5, 0.1],
-    ['mixPill', 'Weight: word pills', 0, 5, 0.1],
     ['objScale', 'Object size', 0.3, 3, 0.05],
     ['objDepth', 'Thickness (m, new objects)', 0.002, 0.05, 0.001],
     ['outSpeed', 'Out speed', 0, 5, 0.05],
@@ -323,6 +354,9 @@ export const SCHEMA = [
     ['panelOffset', 'Distance from screen', 0, 1, 0.01],
     ['panelOpacity', 'Opacity', 0.2, 1, 0.01],
     ['panelScrollSpeed', 'Scroll speed', 0.2, 5, 0.1],
+    ['panelExtend', 'Scrolled part continues above'],
+    ['panelExtendMax', 'Max height above (m)', 0, 2, 0.05],
+    ['panelExtendFade', 'Fade toward the top', 0, 1, 0.05],
   ]],
   ['Screen detection', [
     ['findHueMin', 'Hue min', 0, 180, 1],

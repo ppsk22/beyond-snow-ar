@@ -16,6 +16,7 @@ import { Physics } from './physics.js';
 import { ScreenShow } from './show.js';
 import { PagePanel } from './panel.js';
 import { SurfaceConfirm } from './surfaces.js';
+import { Fallers } from './fallers.js';
 import { toonMaterial, LIGHT_DIR } from './look.js';
 import { createSnow2D } from './snow2d.js';
 import { createTuner } from './tuner.js';
@@ -99,7 +100,7 @@ const world = new SnowWorld(P.cell);
 const logoWorld = new SnowWorld(P.logoSample, true);
 const worlds = [logoWorld, world];
 const occ = new Occupancy();
-const snowMat = toonMaterial({ base: P.colSnow, shade: P.colSnowShade, outline: P.colOutline, steps: P.toonSteps, outlineW: P.outlineWidth, rim: true, polygonOffset: true, gain: P.shadeGain });
+const snowMat = toonMaterial({ base: P.colSnow, shade: P.colSnowShade, outline: P.colOutline, steps: P.toonSteps, outlineW: P.outlineWidth, rim: true, polygonOffset: true, gain: P.shadeGain, soft: P.shadeSoft, outlineMix: P.outlineMix });
 const blanket = new BlanketRenderer(world, snowMat, scene);
 const logo = new Logo(P, scene);
 logo.load('assets/logo.svg').catch((e) => console.warn('logo', e));
@@ -121,6 +122,8 @@ const show = new ScreenShow(P, scene, kit, physics);
 show.words = WORDS;
 const page = new PagePanel(P, scene);
 const surf = new SurfaceConfirm(P, scene, world);
+const fallers = new Fallers(P, scene, kit);
+fallers.words = WORDS;
 let staticsT = 0;
 let platesT = 0;
 const screenSource = (pos, vel) => show.snowSource(pos, vel);
@@ -155,6 +158,8 @@ function applyLook(key) {
   snowMat.uniforms.uOutlineW.value = P.outlineWidth;
   snowMat.uniforms.uSteps.value = P.toonSteps;
   snowMat.uniforms.uGain.value = P.shadeGain;
+  snowMat.uniforms.uSoft.value = P.shadeSoft;
+  snowMat.uniforms.uOutlineMix.value = P.outlineMix;
   snowMat.uniforms.uShade.value.set(P.colSnowShade);
   for (const m of [flakes.mat, chunks.mat]) m.uniforms.uShade.value.set(P.colSnowShade);
   logo.recolor(P);
@@ -245,6 +250,10 @@ function simulate(dt, now, haveDepth) {
   const ctx = { P, worlds, occ, df: haveDepth || df.ok ? df : null, cam: df.ok ? df.camPos : camera.position, now, quality, screenSource: show.active ? screenSource : null };
   flakes.update(dt, ctx);
   chunks.update(dt, ctx);
+  // Floor for the falling shapes: confirmed floor, else the lowest big snowy region, else a guess below the phone.
+  ctx.floorY = surf.floor ? surf.floor.y : world.lowestPlateY !== null ? world.lowestPlateY : ctx.cam.y - P.assumeFloorBelow;
+  ctx.fwd = df.ok ? new THREE.Vector3(-df.camWorld.elements[8], 0, -df.camWorld.elements[10]) : new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  fallers.update(dt, ctx);
   const budget = 4000 * quality;
   blanket.update(P, budget);
   logoBlanket.update(P, budget);
@@ -331,6 +340,7 @@ async function startAR() {
   renderer.domElement.style.display = '';
   scene.background = null;
   renderer.setClearColor(0x000000, 0);
+  layer.classList.add('on');
   if (sim) sim.setVisible(false);
   renderer.xr.setReferenceSpaceType('local');
   await renderer.xr.setSession(session);
@@ -343,6 +353,7 @@ async function startAR() {
   startScreenSearch();
   session.addEventListener('end', () => {
     xrSession = null; hitSource = null; mode = 'landing';
+    layer.classList.remove('on');
     show.stop(); finder.stop(); page.show(false);
     renderer.setAnimationLoop(null);
     renderer.domElement.style.display = 'none';
@@ -504,10 +515,8 @@ function handleTap(ray, camPos) {
   if (ray) {
     const ph = page.hit(ray);
     if (ph) {
-      if (ph.word && show.active) {
-        const dir = ray.ray.direction.clone().negate();
-        show.spawn('pill', 'out', { pos: ph.point.clone().addScaledVector(dir, 0.04), vel: dir.multiplyScalar(1.4).add(new THREE.Vector3(0, 1.2, 0)) }, ph.word);
-      }
+      // A tapped buzzword drops off the page as a falling pill.
+      if (ph.word) fallers.drop(ph.word, ph.point.clone().addScaledVector(ray.ray.direction, -0.05), camPos);
       return;
     }
     if (show.active && show.tap(physics.raycast(ray), ray.ray.direction)) return;
@@ -530,7 +539,37 @@ function onScreenLocked(pose, now) {
   ui.pageBtn.hidden = false;
 }
 
-// Swipes on the overlay scroll the page panel.
+// AR touch layer: covers the screen under the buttons. Taps become rays (tap / long press), vertical
+// drags scroll the page. Handling it here (instead of XR select events) is what makes scrolling work:
+// a DOM overlay with no element under the finger never sees the drag.
+const layer = document.createElement('div');
+layer.id = 'touchLayer';
+ui.hud.insertBefore(layer, ui.hud.firstChild);
+noXRSelect(layer);
+const drag = { on: false, x: 0, y: 0, ly: 0, t: 0, moved: false };
+function screenRay(x, y) {
+  if (!df.ok) return null;
+  const o = new THREE.Vector3(), d = new THREE.Vector3();
+  finder.ray(df, x / window.innerWidth, y / window.innerHeight, o, d);
+  return new THREE.Raycaster(o, d.normalize());
+}
+layer.addEventListener('pointerdown', (e) => { Object.assign(drag, { on: true, x: e.clientX, y: e.clientY, ly: e.clientY, t: performance.now(), moved: false }); });
+layer.addEventListener('pointermove', (e) => {
+  if (!drag.on) return;
+  if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 10) drag.moved = true;
+  if (drag.moved && page.visible) page.scrollBy((drag.ly - e.clientY) * P.panelScrollSpeed * 2);
+  drag.ly = e.clientY;
+});
+layer.addEventListener('pointerup', (e) => {
+  if (!drag.on) return;
+  drag.on = false;
+  if (drag.moved) return;
+  const ray = screenRay(e.clientX, e.clientY);
+  if ((performance.now() - drag.t) / 1000 > P.longPress) handleLongPress(ray); else handleTap(ray, df.camPos);
+});
+layer.addEventListener('pointercancel', () => { drag.on = false; });
+
+// Swipes on the overlay scroll the page panel (fallback).
 const touch = { y: 0, moved: false, active: false };
 ui.overlay.addEventListener('touchstart', (e) => { touch.active = true; touch.moved = false; touch.y = e.touches[0].clientY; }, { passive: true });
 ui.overlay.addEventListener('touchmove', (e) => {
@@ -665,6 +704,7 @@ function startScreenSearch() {
 
 function resetWorld() {
   surf.clear();
+  fallers.clear();
   world.cell = P.cell;
   world.clear();
   logoWorld.clear();
@@ -701,7 +741,7 @@ window.__bsar = {
   P, world, logoWorld, occ, df, flakes, chunks, logo, camera, look, stats, personMask, occl,
   get sim() { return sim; },
   get mode() { return mode; },
-  startSim, resetWorld, finder, show, physics, page, kit, handleTap, handleLongPress, surf, THREE_Raycaster: THREE.Raycaster,
+  startSim, resetWorld, finder, show, fallers, physics, page, kit, handleTap, handleLongPress, surf, THREE_Raycaster: THREE.Raycaster,
   placeLogoAt(x, y, z) { logo.place(new THREE.Vector3(x, y, z), camera.position, logoWorld); },
   liveArea() { let n = 0; for (const l of world.levels) if (l.cert) n++; return n * world.cell * world.cell; },
   snowVolume() { let v = 0; for (const l of world.levels) v += l.vis; return v * world.cell * world.cell; },
